@@ -1,20 +1,25 @@
 """
 Script to generate a polished, professional PDF submission document for EmailCheck.
 Outputs: submission/EmailCheck_Project_Submission.pdf
+Supports parameterized GitHub URL and Live Deployment URL.
 """
 
 import os
 import sys
-from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 )
 
-def create_submission_pdf(output_path: str):
+def create_submission_pdf(
+    output_path: str,
+    repo_url: str = "https://github.com/your-username/emailcheck",
+    live_url: str = "https://emailcheck.onrender.com",
+    is_live_verified: bool = False,
+    is_repo_verified: bool = False
+):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # 0.5 inch margins to fit content cleanly on 2 pages
@@ -36,7 +41,6 @@ def create_submission_pdf(output_path: str):
     muted_text = colors.HexColor("#475569")        # Slate 600
     bg_light = colors.HexColor("#f8fafc")          # Slate 50
     border_color = colors.HexColor("#cbd5e1")      # Slate 300
-    green_color = colors.HexColor("#047857")       # Emerald 700
 
     title_style = ParagraphStyle(
         'DocTitle',
@@ -77,12 +81,6 @@ def create_submission_pdf(output_path: str):
         leading=11.5,
         textColor=dark_text,
         spaceAfter=4
-    )
-
-    body_bold = ParagraphStyle(
-        'BodyBold',
-        parent=body_style,
-        fontName='Helvetica-Bold'
     )
 
     callout_style = ParagraphStyle(
@@ -161,6 +159,23 @@ def create_submission_pdf(output_path: str):
 
     # 2. Deployment & Repository URLs
     story.append(Paragraph("2. Application URLs & Repository Status", h2_style))
+    
+    repo_status = "<font color='#047857'><b>Verified & Active</b></font>" if is_repo_verified else "<font color='#b45309'><b>Pending Auth</b></font>"
+    repo_link = f'<a href="{repo_url}"><font color="#2563eb"><u>{repo_url}</u></font></a>'
+    repo_desc = f"Active Public GitHub Repository: {repo_link}" if is_repo_verified else (
+        f"Git repository committed locally on branch <code>main</code>.<br/>"
+        f"Push Command: <code>gh repo create emailcheck --public --source=. --remote=origin --push</code><br/>"
+        f"Target URL: {repo_link} <i>(Requires one-click GitHub sign-in)</i>"
+    )
+
+    live_status = "<font color='#047857'><b>Verified Live</b></font>" if is_live_verified else "<font color='#b45309'><b>Pending Deployment</b></font>"
+    live_link = f'<a href="{live_url}"><font color="#2563eb"><u>{live_url}</u></font></a>'
+    live_desc = f"Public Deployed Application URL: {live_link}<br/>Endpoints verified: <code>/health</code> (200 OK) and <code>POST /api/verify</code>." if is_live_verified else (
+        f"Configured for Render deployment via <code>render.yaml</code> and <code>Procfile</code>.<br/>"
+        f"Health check configured at <code>/health</code>.<br/>"
+        f"Target URL: {live_link} <i>(Pending Render web service link)</i>"
+    )
+
     url_data = [
         [
             Paragraph("<b>Item</b>", table_header_style),
@@ -169,23 +184,13 @@ def create_submission_pdf(output_path: str):
         ],
         [
             Paragraph("<b>GitHub Repository</b>", table_cell_bold),
-            Paragraph("<font color='#047857'><b>Committed Locally</b></font>", table_cell_style),
-            Paragraph(
-                "Git initialized (branch: <code>main</code>), complete codebase and tests committed.<br/>"
-                "Push remote: <code>gh repo create emailcheck --public --source=. --remote=origin --push</code><br/>"
-                "Target Repo: <font color='#2563eb'><u>https://github.com/your-username/emailcheck</u></font> <i>(Pending user GitHub authentication)</i>",
-                table_cell_style
-            ),
+            Paragraph(repo_status, table_cell_style),
+            Paragraph(repo_desc, table_cell_style),
         ],
         [
             Paragraph("<b>Live Cloud Deployment</b>", table_cell_bold),
-            Paragraph("<font color='#2563eb'><b>Production Ready</b></font>", table_cell_style),
-            Paragraph(
-                "Configured for Render deployment via <code>render.yaml</code> and <code>Procfile</code>.<br/>"
-                "Health endpoint configured at <code>/health</code>.<br/>"
-                "Deployment URL: <font color='#2563eb'><u>https://emailcheck.onrender.com</u></font> <i>(Pending Render web service link)</i>",
-                table_cell_style
-            ),
+            Paragraph(live_status, table_cell_style),
+            Paragraph(live_desc, table_cell_style),
         ],
         [
             Paragraph("<b>Local Server Verified</b>", table_cell_bold),
@@ -197,7 +202,7 @@ def create_submission_pdf(output_path: str):
             ),
         ]
     ]
-    url_table = Table(url_data, colWidths=[110, 85, 345])
+    url_table = Table(url_data, colWidths=[110, 95, 335])
     url_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), primary_color),
         ('BOX', (0, 0), (-1, -1), 0.5, border_color),
