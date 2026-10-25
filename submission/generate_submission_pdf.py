@@ -16,8 +16,8 @@ from reportlab.platypus import (
 def create_submission_pdf(
     output_path: str,
     repo_url: str = "https://github.com/Zenith150/emailcheck",
-    live_url: str = "https://emailcheck.onrender.com",
-    is_live_verified: bool = False,
+    live_url: str = "https://emailcheck-7c9y.onrender.com/",
+    is_live_verified: bool = True,
     is_repo_verified: bool = True
 ):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -162,7 +162,7 @@ def create_submission_pdf(
     
     repo_status = "<font color='#047857'><b>Verified & Active</b></font>" if is_repo_verified else "<font color='#b45309'><b>Pending Auth</b></font>"
     repo_link = f'<a href="{repo_url}"><font color="#2563eb"><u>{repo_url}</u></font></a>'
-    repo_desc = f"Active Public GitHub Repository: {repo_link}" if is_repo_verified else (
+    repo_desc = f"Public GitHub Repository: {repo_link}<br/>Default branch: <code>main</code> (Fully committed and pushed)." if is_repo_verified else (
         f"Git repository committed locally on branch <code>main</code>.<br/>"
         f"Push Command: <code>gh repo create emailcheck --public --source=. --remote=origin --push</code><br/>"
         f"Target URL: {repo_link} <i>(Requires one-click GitHub sign-in)</i>"
@@ -170,7 +170,7 @@ def create_submission_pdf(
 
     live_status = "<font color='#047857'><b>Verified Live</b></font>" if is_live_verified else "<font color='#b45309'><b>Pending Deployment</b></font>"
     live_link = f'<a href="{live_url}"><font color="#2563eb"><u>{live_url}</u></font></a>'
-    live_desc = f"Public Deployed Application URL: {live_link}<br/>Endpoints verified: <code>/health</code> (200 OK) and <code>POST /api/verify</code>." if is_live_verified else (
+    live_desc = f"Live Cloud Application: {live_link}<br/>Production deployment on Render. Verified endpoints: <code>/</code>, <code>/health</code> (200 OK), and <code>POST /api/verify</code>." if is_live_verified else (
         f"Configured for Render deployment via <code>render.yaml</code> and <code>Procfile</code>.<br/>"
         f"Health check configured at <code>/health</code>.<br/>"
         f"Target URL: {live_link} <i>(Pending Render web service link)</i>"

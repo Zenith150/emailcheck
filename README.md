@@ -27,11 +27,11 @@ The application classifies addresses into three conservative, transparent status
 
 ## Live Demo & Repository Links
 
+- **Live Application URL:** [https://emailcheck-7c9y.onrender.com/](https://emailcheck-7c9y.onrender.com/)
 - **GitHub Repository URL:** [https://github.com/Zenith150/emailcheck](https://github.com/Zenith150/emailcheck)
-- **1-Click Render Deployment:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Zenith150/emailcheck)
-- **Live Application URL:** *Pending Render service activation (Target: `https://emailcheck.onrender.com`)*
+- **Deployment Status:** **Active & Verified on Render** (`GET /health` $\rightarrow$ 200 OK)
 
-> **Deployment Status:** The repository has been published publicly to GitHub. Follow the 1-click Render blueprint link above or see the [Deployment Guide](#production-deployment-guide) to activate the free web service.
+> **Deployment Verification:** The application is live and publicly accessible at [https://emailcheck-7c9y.onrender.com/](https://emailcheck-7c9y.onrender.com/). All public endpoints (`/`, `/health`, and `POST /api/verify`) are verified and operational.
 
 ---
 
@@ -285,8 +285,8 @@ All 31 tests run isolated from the network via mocks and complete in under 1 sec
    *(Render will also detect `render.yaml` or `Procfile` automatically)*
 
 3. **Verify Live Deployment:**
-   - Once deployed, open your live `.onrender.com` URL.
-   - Verify that `/health` returns status code `200`.
+   - Open the live application at [https://emailcheck-7c9y.onrender.com/](https://emailcheck-7c9y.onrender.com/).
+   - Verify that `/health` returns status code `200` ([https://emailcheck-7c9y.onrender.com/health](https://emailcheck-7c9y.onrender.com/health)).
    - Test address verification from the live dashboard.
 
 ---
