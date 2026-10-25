@@ -27,10 +27,11 @@ The application classifies addresses into three conservative, transparent status
 
 ## Live Demo & Repository Links
 
-- **Live Application URL:** *Pending deployment by user / repository owner (see [Deployment Guide](#production-deployment-guide))*
-- **GitHub Repository URL:** *Pending GitHub publication (see [GitHub Publishing Guide](#github-publishing-guide))*
+- **GitHub Repository URL:** [https://github.com/Zenith150/emailcheck](https://github.com/Zenith150/emailcheck)
+- **1-Click Render Deployment:** [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Zenith150/emailcheck)
+- **Live Application URL:** *Pending Render service activation (Target: `https://emailcheck.onrender.com`)*
 
-> **Notice:** Per project rules against fabricating external URLs, live deployment and remote GitHub URLs are verified upon repository creation and cloud host activation.
+> **Deployment Status:** The repository has been published publicly to GitHub. Follow the 1-click Render blueprint link above or see the [Deployment Guide](#production-deployment-guide) to activate the free web service.
 
 ---
 
@@ -269,45 +270,35 @@ All 31 tests run isolated from the network via mocks and complete in under 1 sec
 
 ### Deploying to Render
 
-1. **Push your repository to GitHub:**
-   ```bash
-   git remote add origin https://github.com/<your-username>/emailcheck.git
-   git branch -M main
-   git push -u origin main
-   ```
+1. **Option A: 1-Click Blueprint Deploy (Fastest):**
+   - Click the [Deploy to Render](https://render.com/deploy?repo=https://github.com/Zenith150/emailcheck) button.
+   - Render automatically reads [`render.yaml`](render.yaml) and creates the service with all environment variables.
 
-2. **Connect to Render:**
-   - Log in to [Render Dashboard](https://dashboard.render.com/).
+2. **Option B: Manual Dashboard Setup:**
+   - Log in to the [Render Dashboard](https://dashboard.render.com/).
    - Click **New +** -> **Web Service**.
-   - Select your GitHub repository `emailcheck`.
-
-3. **Configure Settings:**
+   - Connect your GitHub account and select repository `Zenith150/emailcheck`.
    - **Environment:** `Python`
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `gunicorn app:app --bind 0.0.0.0:$PORT`
    - **Health Check Path:** `/health`
-   *(Render will also automatically detect `render.yaml` or `Procfile`)*
+   *(Render will also detect `render.yaml` or `Procfile` automatically)*
 
-4. **Verify Live Deployment:**
-   - Once deployed, open the live `.onrender.com` URL.
+3. **Verify Live Deployment:**
+   - Once deployed, open your live `.onrender.com` URL.
    - Verify that `/health` returns status code `200`.
    - Test address verification from the live dashboard.
 
 ---
 
-## GitHub Publishing Guide
+## GitHub Repository
 
-To push this codebase to your own GitHub account:
-```powershell
-# 1. Log into GitHub CLI (or authenticate via browser)
-gh auth login
-
-# 2. Create a new public repository and push:
-gh repo create emailcheck --public --source=. --remote=origin --push
-
-# 3. View your live repository:
-gh browse
-```
+The public repository is active at:
+- **Repository:** [https://github.com/Zenith150/emailcheck](https://github.com/Zenith150/emailcheck)
+- **Clone command:**
+  ```bash
+  git clone https://github.com/Zenith150/emailcheck.git
+  ```
 
 ---
 

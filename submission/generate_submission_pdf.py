@@ -15,10 +15,10 @@ from reportlab.platypus import (
 
 def create_submission_pdf(
     output_path: str,
-    repo_url: str = "https://github.com/your-username/emailcheck",
+    repo_url: str = "https://github.com/Zenith150/emailcheck",
     live_url: str = "https://emailcheck.onrender.com",
     is_live_verified: bool = False,
-    is_repo_verified: bool = False
+    is_repo_verified: bool = True
 ):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
