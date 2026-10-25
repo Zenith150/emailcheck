@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: emailcheck
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 60
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: MAX_EMAILS_PER_REQUEST
+        value: 100
+      - key: RATE_LIMIT_REQUESTS
+        value: 30
+      - key: RATE_LIMIT_WINDOW
+        value: 60

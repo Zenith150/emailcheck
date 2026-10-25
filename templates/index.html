@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmailCheck — Professional Email Verification & Diagnostics</title>
+  <meta name="description" content="Fast, transparent, non-invasive email verification. Classify email deliverability with syntax analysis, DNS MX routing, and safe SMTP checks.">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Header Navigation -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5C2 7 4 5 6.5 5H17.5C20 5 22 7 22 9.5V17z"/>
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+            <path d="m9 13 2 2 4-4"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>EmailCheck</h1>
+          <span class="badge-tag">Deliverability Diagnostics</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="#about" class="nav-link">How It Works</a>
+        <a href="/health" target="_blank" class="nav-link status-pill">
+          <span class="status-dot"></span> System Status
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-content">
+    <div class="content-wrapper">
+
+      <!-- Disclaimer & Overview Notice Banner -->
+      <section class="notice-banner" aria-label="Verification Disclaimer">
+        <div class="notice-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+        </div>
+        <div class="notice-body">
+          <strong>Non-Invasive Verification Notice:</strong>
+          <span>EmailCheck performs non-invasive RFC syntax analysis and DNS/MX mail exchanger checks. Verification results represent <em>deliverability estimates rather than inbox guarantees</em>. No actual emails are ever sent.</span>
+        </div>
+      </section>
+
+      <!-- Cloud Environment SMTP Status Notice -->
+      <div class="host-notice" id="hostNotice">
+        <div class="host-notice-content">
+          <span class="host-status-indicator {% if smtp_available %}host-status-online{% else %}host-status-restricted{% endif %}"></span>
+          <span>
+            {% if smtp_available %}
+              <strong>Hosting Environment:</strong> Outbound SMTP (port 25) is accessible on this host. Optional deep recipient handshake is available.
+            {% else %}
+              <strong>Hosting Environment Notice:</strong> Standard outbound SMTP port 25 is restricted by this cloud hosting provider (typical on Render/cloud hosts for spam prevention). Full syntax validation, DNS resolution, and MX mail exchanger checks remain 100% operational.
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <!-- Input Card -->
+      <section class="card input-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h2 class="card-title">Verify Email Addresses</h2>
+            <p class="card-subtitle">Paste multiple email addresses below (one per line, up to {{ max_emails }} per batch).</p>
+          </div>
+          <div class="input-stats">
+            <span id="lineCountBadge" class="counter-badge">0 / {{ max_emails }} addresses</span>
+          </div>
+        </div>
+
+        <form id="verifyForm" class="verify-form" onsubmit="return false;">
+          <div class="textarea-wrapper">
+            <textarea
+              id="emailsInput"
+              name="emails"
+              rows="7"
+              placeholder="alex.smith@example.com&#10;sarah.johnson@company.org&#10;contact@active-mail-domain.com"
+              aria-label="Email list to verify"
+              spellcheck="false"
+              autocomplete="off"
+            ></textarea>
+          </div>
+
+          <div class="form-options">
+            <label class="checkbox-label" title="Safely connect to recipient mail server without sending message body">
+              <input type="checkbox" id="smtpCheckToggle" {% if not smtp_available %}disabled{% endif %}>
+              <span class="checkbox-custom"></span>
+              <span class="checkbox-text">
+                Attempt Safe SMTP Handshake (Recipient Probe)
+                {% if not smtp_available %}
+                  <em class="disabled-hint">(Unavailable on this cloud host)</em>
+                {% endif %}
+              </span>
+            </label>
+
+            <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+              Load Sample List
+            </button>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" id="verifyBtn" class="btn btn-primary">
+              <span class="btn-spinner" id="btnSpinner" aria-hidden="true"></span>
+              <svg id="btnIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              <span id="btnText">Verify Emails</span>
+            </button>
+
+            <button type="button" id="clearBtn" class="btn btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+              Clear
+            </button>
+          </div>
+        </form>
+
+        <!-- Progress Bar Indicator -->
+        <div id="progressContainer" class="progress-bar-container" style="display: none;">
+          <div class="progress-info">
+            <span id="progressText">Verifying DNS & mail exchangers...</span>
+            <span class="progress-pulsar"></span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-bar-fill indeterminate"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Summary Statistics Section -->
+      <section id="summarySection" class="summary-grid" style="display: none;" aria-label="Verification Summary">
+        <div class="summary-card card-total">
+          <div class="card-icon total-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <div class="summary-meta">
+            <span class="summary-label">Total Addresses</span>
+            <span id="summaryTotal" class="summary-value">0</span>
+          </div>
+        </div>
+
+        <div class="summary-card card-delivered">
+          <div class="card-icon delivered-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </div>
+          <div class="summary-meta">
+            <span class="summary-label">Likely to be Delivered</span>
+            <span id="summaryDelivered" class="summary-value text-green">0</span>
+            <span id="pctDelivered" class="summary-subtext">0%</span>
+          </div>
+        </div>
+
+        <div class="summary-card card-bounce">
+          <div class="card-icon bounce-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </div>
+          <div class="summary-meta">
+            <span class="summary-label">Likely to Bounce</span>
+            <span id="summaryBounce" class="summary-value text-red">0</span>
+            <span id="pctBounce" class="summary-subtext">0%</span>
+          </div>
+        </div>
+
+        <div class="summary-card card-unknown">
+          <div class="card-icon unknown-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div class="summary-meta">
+            <span class="summary-label">Unknown</span>
+            <span id="summaryUnknown" class="summary-value text-amber">0</span>
+            <span id="pctUnknown" class="summary-subtext">0%</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Results Section -->
+      <section id="resultsSection" class="card results-card" style="display: none;">
+        <div class="results-header">
+          <div class="filter-controls">
+            <div class="filter-tabs" role="tablist">
+              <button type="button" class="tab-btn active" data-filter="all" role="tab" aria-selected="true">
+                All <span id="tabCountAll" class="tab-counter">0</span>
+              </button>
+              <button type="button" class="tab-btn filter-delivered" data-filter="Likely to be Delivered" role="tab" aria-selected="false">
+                Delivered <span id="tabCountDelivered" class="tab-counter">0</span>
+              </button>
+              <button type="button" class="tab-btn filter-bounce" data-filter="Likely to Bounce" role="tab" aria-selected="false">
+                Bounce <span id="tabCountBounce" class="tab-counter">0</span>
+              </button>
+              <button type="button" class="tab-btn filter-unknown" data-filter="Unknown" role="tab" aria-selected="false">
+                Unknown <span id="tabCountUnknown" class="tab-counter">0</span>
+              </button>
+            </div>
+
+            <div class="search-box">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="searchInput" placeholder="Filter emails..." aria-label="Filter results table">
+            </div>
+          </div>
+
+          <div class="export-actions">
+            <button type="button" id="downloadCsvBtn" class="btn btn-outline btn-sm">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Download CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Responsive Table Container -->
+        <div class="table-container">
+          <table class="results-table" id="resultsTable">
+            <thead>
+              <tr>
+                <th scope="col" style="width: 50px;">#</th>
+                <th scope="col">Email Address</th>
+                <th scope="col" style="width: 110px;">Syntax</th>
+                <th scope="col" style="width: 140px;">Domain / MX</th>
+                <th scope="col" style="width: 170px;">Classification</th>
+                <th scope="col">Explanation & Diagnostics</th>
+              </tr>
+            </thead>
+            <tbody id="resultsTableBody">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="noMatchMessage" class="no-matches" style="display: none;">
+          <p>No results match your active search or filter.</p>
+        </div>
+      </section>
+
+      <!-- Empty State -->
+      <section id="emptyState" class="empty-state">
+        <div class="empty-illustration">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+            <circle cx="18" cy="18" r="3"/>
+            <path d="m17 18 1 1 2-2"/>
+          </svg>
+        </div>
+        <h3>No Emails Verified Yet</h3>
+        <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to analyze syntax validity, DNS routing, and deliverability status.</p>
+      </section>
+
+      <!-- Information & Methodology Section -->
+      <section id="about" class="info-section">
+        <h2 class="info-title">How Email Verification Works</h2>
+        <div class="info-grid">
+          <div class="info-card">
+            <div class="info-badge badge-green">1. Likely to be Delivered</div>
+            <p>The email has valid RFC 5322 syntax, points to a real domain with active MX mail exchangers, and passed non-invasive deliverability diagnostics.</p>
+            <small class="text-muted">Estimated deliverability. Inbox placement still depends on spam filters and recipient policy.</small>
+          </div>
+
+          <div class="info-card">
+            <div class="info-badge badge-red">2. Likely to Bounce</div>
+            <p>The address has malformed syntax, the domain does not exist in DNS (NXDOMAIN), lacks mail routing records, or an explicit rejection code was received.</p>
+            <small class="text-muted">Mail sent to these addresses will almost certainly fail or be rejected.</small>
+          </div>
+
+          <div class="info-card">
+            <div class="info-badge badge-amber">3. Unknown</div>
+            <p>Verification is inconclusive due to DNS timeouts, greylisting, catch-all domain configurations, or cloud platform restrictions on outbound port 25.</p>
+            <small class="text-muted">Safe assessment: Never assumes a mailbox exists if the server hides or generalizes status.</small>
+          </div>
+        </div>
+
+        <div class="privacy-box">
+          <h4>🔒 Privacy & Safety Guarantee</h4>
+          <p>EmailCheck strictly adheres to non-invasive verification. We <strong>never send emails</strong>, never issue SMTP <code>DATA</code> commands, and do not store submitted email lists in permanent databases. All processing occurs in memory and user data is never retained.</p>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="footer-container">
+      <p>&copy; 2026 EmailCheck — Built with Flask, dnspython, and clean standards.</p>
+      <div class="footer-links">
+        <a href="/health" target="_blank">API Health</a>
+        <span class="sep">•</span>
+        <a href="#about">Privacy & Methodology</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
