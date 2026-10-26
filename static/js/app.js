@@ -248,21 +248,21 @@ document.addEventListener('DOMContentLoaded', () => {
   emailsInput.addEventListener('input', updateInputCounter);
 
   // ==========================================================================
-  // Sample Email Loader (MailCheck-Inspired Diverse Test Cases)
+  // Sample Email Loader (Diverse Test Cases: Bounce, Unknown, Memoization)
   // ==========================================================================
   loadSampleBtn.addEventListener('click', () => {
     const samples = [
-      'user+newsletter@subdomain.example.org',
-      'contact@google.com',
       'support@github.com',
+      'contact@google.com',
       'test.user@mailinator.com',
-      'bad-email-without-domain@',
-      'contact@this-domain-does-not-exist-987654321.xyz',
+      'service@example.org',
+      'bad..syntax@@domain',
+      'user@nonexistent-domain-xyz987654321.org',
       'support@github.com' // Duplicate to demonstrate memoization
     ];
     emailsInput.value = samples.join('\n');
     updateInputCounter();
-    showToast('Loaded diverse sample addresses for verification.', 'info');
+    showToast('Loaded diverse sample addresses demonstrating bounce, unknown, and memoization.', 'info');
   });
 
   // ==========================================================================

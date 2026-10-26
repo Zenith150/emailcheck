@@ -277,7 +277,7 @@ def create_submission_pdf(
         ],
         [
             Paragraph("<b>User Interface</b>", table_cell_bold),
-            Paragraph("Responsive dashboard, real-time address counter, 4 summary metric cards (Total, Likely to Deliver, Likely to Bounce, Unknown), status filters, instant search, pagination, collapsible diagnostics, Domain Diagnostics tool, Verification History, and RFC 4180 CSV export.", table_cell_style)
+            Paragraph("Modern SaaS dashboard with Dark/Light theme switcher, real-time address counter, 4 summary metric cards (Total, Likely to Deliver, Likely to Bounce, Unknown), deep Inspection Modal, status filters, instant search, pagination, collapsible diagnostics, Domain Diagnostics tool, Verification History, and RFC 4180 CSV export.", table_cell_style)
         ],
         [
             Paragraph("<b>Security & Privacy</b>", table_cell_bold),
@@ -299,7 +299,7 @@ def create_submission_pdf(
     story.append(Paragraph("6. Automated Test Suite Summary", h2_style))
     test_text = (
         "The automated test suite across <code>tests/test_verifier.py</code>, <code>tests/test_smtp_probe.py</code>, and "
-        "<code>tests/test_api.py</code> was executed and passed completely with <b>70 passed tests in 0.35 seconds</b>:<br/>"
+        "<code>tests/test_api.py</code> was executed and passed completely with <b>83 passed tests in 0.49 seconds</b>:<br/>"
         "• Authoritative 7-Stage Pipeline definition & regression verification against LaTeX leaks: <b>PASSED</b><br/>"
         "• RFC 5322 Syntax validation & Local-part preserving Normalization: <b>PASSED</b><br/>"
         "• Disposable domain detection (Mailinator, Sharklasers, GuerrillaMail, etc.): <b>PASSED</b><br/>"
@@ -309,7 +309,7 @@ def create_submission_pdf(
         "• Opt-in checkbox request extraction (<code>check_smtp</code> & <code>smtp_check</code>) and server security controls: <b>PASSED</b><br/>"
         "• Server-disabled reporting vs. host port 25 block reporting and UI rendering regression: <b>PASSED</b><br/>"
         "• HTTPS Provider integrations (Abstract, Hunter, ZeroBounce, Local fallback): <b>PASSED</b><br/>"
-        "• 3 Assignment deliverability classifications (Likely to be delivered, Likely to bounce, Unknown): <b>PASSED</b><br/>"
+        "• Dedicated Deterministic Classification Suite for all 3 assignment outcomes (Likely to be delivered, Likely to bounce, Unknown): <b>PASSED</b><br/>"
         "• Batch memoization, 100-email size boundaries, rate limiting, and API error handlers: <b>PASSED</b>"
     )
     story.append(Paragraph(test_text, body_style))

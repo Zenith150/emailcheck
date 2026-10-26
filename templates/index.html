@@ -94,7 +94,7 @@
               <span class="def-dot dot-emerald"></span>
               <h4>Likely to be delivered</h4>
             </div>
-            <p>Syntax passes RFC rules and verified mail-routing MX servers accept traffic. Note: Recipient delivery is subject to mailbox quota and spam filtering.</p>
+            <p>RFC syntax is valid, active MX mail routing is confirmed, domain is not disposable, AND positive mailbox existence is verified via HTTPS provider API or genuine SMTP 250 OK handshake. (Note: Downstream delivery is still subject to spam filters and mailbox quotas).</p>
           </div>
 
           <div class="def-card def-card-bounce">
@@ -102,7 +102,7 @@
               <span class="def-dot dot-rose"></span>
               <h4>Likely to bounce</h4>
             </div>
-            <p>Invalid syntax, nonexistent domain (NXDOMAIN), RFC 7505 Null MX record, or confirmed absence of mail routes. Mail will be permanently rejected.</p>
+            <p>Malformed syntax, nonexistent domain (NXDOMAIN), RFC 7505 Null MX record ('0 .'), domain without mail routing (no MX/A records), explicit SMTP 550 recipient rejection, or provider-confirmed undeliverable inbox.</p>
           </div>
 
           <div class="def-card def-card-unknown">
@@ -110,8 +110,23 @@
               <span class="def-dot dot-amber"></span>
               <h4>Unknown</h4>
             </div>
-            <p>Domain MX routing is active, but individual mailbox existence could not be confirmed without outbound SMTP (port 25 blocked) or an HTTPS provider.</p>
+            <p>Domain MX routing is active, but individual mailbox existence cannot be determined (outbound port 25 is restricted on Render and no HTTPS verification API key is configured), or domain is catch-all, disposable, or timed out.</p>
           </div>
+        </div>
+
+        <!-- Render Cloud Deployment Honest Transparency Notice -->
+        <div class="modal-callout-note" style="margin-top:1.25rem; border-left:3px solid var(--accent-primary); background:var(--bg-surface); padding:0.85rem 1rem; border-radius:0.5rem; text-align:left;">
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <strong style="font-size:0.8125rem; color:var(--text-primary);">Deployment Notice &amp; Evidence-Based Deliverability:</strong>
+          </div>
+          <p style="font-size:0.75rem; color:var(--text-secondary); line-height:1.45; margin:0;">
+            Syntax validation and DNS MX checks prove that a domain is configured to receive email, but <strong>do not prove that a specific mailbox exists</strong>. On this Render cloud deployment, outbound TCP port 25 is blocked by network security policy and no third-party verification API key is configured. Under these conditions, addresses with active MX records are honestly classified as <strong>Unknown</strong> (rather than guessing or fabricating a delivery guarantee). To verify individual mailboxes, configure an HTTPS provider (<code style="font-size:0.7rem;">EMAIL_VERIFICATION_API_KEY</code>) or run locally/on a VPS with port 25 open.
+          </p>
         </div>
       </section>
 

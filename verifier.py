@@ -493,21 +493,42 @@ def classify_result(
 
         if p_status == "unavailable":
             # If provider is unconfigured (Local fallback), check if genuine SMTP probe succeeded
-            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
-                return (
-                    "Likely to be delivered",
-                    "valid",
-                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). "
-                    "Likely to be delivered. (Warning: Confirms recipient acceptance during SMTP session; downstream delivery is not guaranteed due to anti-spam filtering or mailbox quotas)."
-                )
-            if smtp_info and smtp_info.get("smtp_status") in ("rejected", "mailbox_rejected"):
-                return "Likely to bounce", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_info.get('smtp_explanation')}."
+            if smtp_info and smtp_info.get("smtp_attempted"):
+                smtp_st = smtp_info.get("smtp_status")
+                smtp_exp = smtp_info.get("smtp_explanation") or ""
+                is_ca = smtp_info.get("is_catch_all") or (smtp_st == "catch_all")
+
+                if smtp_st in ("accepted", "mailbox_accepted"):
+                    return (
+                        "Likely to be delivered",
+                        "valid",
+                        "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). "
+                        "Likely to be delivered. (Warning: Confirms recipient acceptance during SMTP session; downstream delivery is not guaranteed due to anti-spam filtering or mailbox quotas)."
+                    )
+                if smtp_st in ("rejected", "mailbox_rejected"):
+                    return "Likely to bounce", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_exp}. Likely to bounce."
+
+                if is_ca:
+                    return (
+                        "Unknown",
+                        "unknown",
+                        "Domain mail server is configured as catch-all (accepts any mailbox indiscriminately). Individual mailbox existence cannot be confirmed; outcome is Unknown."
+                    )
+                if smtp_st == "inconclusive":
+                    return "Unknown", "unknown", f"SMTP recipient probe was inconclusive: {smtp_exp}. Outcome is Unknown."
+                if smtp_st in ("connection_failed", "timeout", "unavailable"):
+                    return (
+                        "Unknown",
+                        "unknown",
+                        "Domain mail routing is active (MX verified), but recipient mailbox existence could not be confirmed "
+                        "(SMTP probe unavailable on this host and no HTTPS verification provider configured). Delivery outcome is Unknown."
+                    )
 
             if is_disposable:
                 return (
                     "Unknown",
                     "unknown",
-                    "Domain belongs to a known temporary/disposable email service. Deliverability is Unknown."
+                    "Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). Deliverability is Unknown as disposable inboxes are short-lived or public."
                 )
 
             # Provider is unconfigured (Local engine) and SMTP unavailable/disabled:

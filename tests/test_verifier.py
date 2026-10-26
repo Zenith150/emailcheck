@@ -752,5 +752,388 @@ class TestDomainDiagnosticsAndPipeline(unittest.TestCase):
         self.assertIn("opt-in", res["smtp_probe"]["smtp_explanation"])
 
 
+class TestDeterministicClassificationOutcomes(unittest.TestCase):
+    """
+    Dedicated test suite demonstrating all three required deliverability outcomes:
+    1. 'Likely to be delivered'
+    2. 'Likely to bounce'
+    3. 'Unknown'
+    Uses deterministic mocks for DNS, SMTP probing, and HTTPS providers.
+    """
+
+    # --------------------------------------------------------------------------
+    # 1. 'Likely to be delivered' Outcomes
+    # --------------------------------------------------------------------------
+    @patch("verifier.probe_smtp_recipient")
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_be_delivered_via_mocked_smtp_250(self, mock_dns, mock_probe):
+        """Address is 'Likely to be delivered' when remote mail server accepts recipient (250 OK)."""
+        mock_dns.return_value = {
+            "domain": "company.org",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.company.org (priority 10)"],
+            "primary_mx": "mail.company.org",
+            "is_null_mx": False,
+            "error": None
+        }
+        mock_probe.return_value = {
+            "smtp_status": "accepted",
+            "smtp_attempted": True,
+            "smtp_response_code": 250,
+            "smtp_response_message": "250 2.1.5 Recipient OK",
+            "smtp_server": "mail.company.org",
+            "smtp_duration_ms": 120.0,
+            "smtp_explanation": "Recipient accepted by server during SMTP handshake (code 250)."
+        }
+
+        with patch.dict(os.environ, {"ENABLE_SMTP_PROBE": "true"}):
+            res = verify_single_email("alice@company.org", perform_smtp=True)
+
+        self.assertEqual(res["classification"], "Likely to be delivered")
+        self.assertEqual(res["status_category"], "valid")
+        self.assertIn("accepted", res["reason"].lower())
+        self.assertIn("downstream delivery is not guaranteed", res["reason"].lower())
+
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_be_delivered_via_mocked_https_provider(self, mock_dns):
+        """Address is 'Likely to be delivered' when HTTPS verification provider confirms inbox deliverable."""
+        mock_dns.return_value = {
+            "domain": "enterprise.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.enterprise.com (priority 10)"],
+            "primary_mx": "mail.enterprise.com",
+            "is_null_mx": False,
+            "error": None
+        }
+
+        mock_provider = MagicMock()
+        mock_provider.name = "abstract"
+        mock_provider.verify_recipient.return_value = {
+            "status": "deliverable",
+            "is_deliverable": True,
+            "is_disposable": False,
+            "is_catch_all": False,
+            "is_role": False,
+            "score": 0.98,
+            "provider": "abstract",
+            "raw_status": "DELIVERABLE",
+            "reason": "Recipient inbox verified deliverable by Abstract API.",
+            "error": None
+        }
+
+        res = verify_single_email("executive@enterprise.com", provider=mock_provider)
+
+        self.assertEqual(res["classification"], "Likely to be delivered")
+        self.assertEqual(res["status_category"], "valid")
+        self.assertIn("confirmed deliverable via provider", res["reason"])
+
+    # --------------------------------------------------------------------------
+    # 2. 'Likely to bounce' Outcomes
+    # --------------------------------------------------------------------------
+    def test_likely_to_bounce_invalid_syntax(self):
+        """Malformed syntax must be classified as 'Likely to bounce'."""
+        invalid_emails = [
+            "bad..syntax@@domain",
+            "missing-at-sign.com",
+            "user@nodot",
+            "user@.leadingdot.com"
+        ]
+        for email in invalid_emails:
+            res = verify_single_email(email)
+            self.assertEqual(res["classification"], "Likely to bounce", f"Failed for {email}")
+            self.assertEqual(res["status_category"], "invalid")
+            self.assertIn("Invalid email syntax", res["reason"])
+
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_bounce_nonexistent_domain(self, mock_dns):
+        """Confirmed nonexistent domain (NXDOMAIN) must be classified as 'Likely to bounce'."""
+        mock_dns.return_value = {
+            "domain": "nonexistent-domain-xyz987654321.org",
+            "domain_status": "nonexistent",
+            "mx_status": "none",
+            "mx_records": [],
+            "primary_mx": None,
+            "is_null_mx": False,
+            "error": "Domain does not exist in DNS (NXDOMAIN)."
+        }
+        res = verify_single_email("user@nonexistent-domain-xyz987654321.org")
+        self.assertEqual(res["classification"], "Likely to bounce")
+        self.assertEqual(res["status_category"], "invalid")
+        self.assertIn("NXDOMAIN", res["reason"])
+
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_bounce_rfc_7505_null_mx(self, mock_dns):
+        """Domain with RFC 7505 Null MX ('0 .') must be classified as 'Likely to bounce'."""
+        mock_dns.return_value = {
+            "domain": "example.org",
+            "domain_status": "exists",
+            "mx_status": "null_mx",
+            "mx_records": ["0 . (RFC 7505 Null MX: Domain explicitly does not accept email)"],
+            "primary_mx": None,
+            "is_null_mx": True,
+            "error": "Domain publishes RFC 7505 Null MX record."
+        }
+        res = verify_single_email("service@example.org")
+        self.assertEqual(res["classification"], "Likely to bounce")
+        self.assertEqual(res["status_category"], "invalid")
+        self.assertIn("Null MX", res["reason"])
+
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_bounce_no_mail_records(self, mock_dns):
+        """Domain without MX or fallback A/AAAA records must be classified as 'Likely to bounce'."""
+        mock_dns.return_value = {
+            "domain": "no-mail-records.com",
+            "domain_status": "exists",
+            "mx_status": "no_records",
+            "mx_records": [],
+            "primary_mx": None,
+            "is_null_mx": False,
+            "error": "Domain has no MX or A records."
+        }
+        res = verify_single_email("test@no-mail-records.com")
+        self.assertEqual(res["classification"], "Likely to bounce")
+        self.assertEqual(res["status_category"], "invalid")
+        self.assertIn("no MX or A records", res["reason"])
+
+    @patch("verifier.probe_smtp_recipient")
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_bounce_mocked_smtp_rejection_550(self, mock_dns, mock_probe):
+        """Permanent recipient rejection (550) during SMTP handshake must be classified as 'Likely to bounce'."""
+        mock_dns.return_value = {
+            "domain": "valid-mail-server.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.valid-mail-server.com"],
+            "primary_mx": "mail.valid-mail-server.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        mock_probe.return_value = {
+            "smtp_status": "rejected",
+            "smtp_attempted": True,
+            "smtp_response_code": 550,
+            "smtp_response_message": "550 5.1.1 User unknown",
+            "smtp_server": "mail.valid-mail-server.com",
+            "smtp_duration_ms": 95.0,
+            "smtp_explanation": "Mail server explicitly rejected recipient address (code 550: User unknown)."
+        }
+
+        with patch.dict(os.environ, {"ENABLE_SMTP_PROBE": "true"}):
+            res = verify_single_email("unknown_user@valid-mail-server.com", perform_smtp=True)
+
+        self.assertEqual(res["classification"], "Likely to bounce")
+        self.assertEqual(res["status_category"], "invalid")
+        self.assertIn("rejected", res["reason"].lower())
+
+    @patch("verifier.check_domain_dns")
+    def test_likely_to_bounce_mocked_provider_undeliverable(self, mock_dns):
+        """HTTPS provider confirming undeliverable must be classified as 'Likely to bounce'."""
+        mock_dns.return_value = {
+            "domain": "active-domain.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.active-domain.com"],
+            "primary_mx": "mail.active-domain.com",
+            "is_null_mx": False,
+            "error": None
+        }
+
+        mock_provider = MagicMock()
+        mock_provider.name = "abstract"
+        mock_provider.verify_recipient.return_value = {
+            "status": "undeliverable",
+            "is_deliverable": False,
+            "is_disposable": False,
+            "is_catch_all": False,
+            "is_role": False,
+            "score": 0.05,
+            "provider": "abstract",
+            "raw_status": "UNDELIVERABLE",
+            "reason": "Recipient inbox does not exist.",
+            "error": None
+        }
+
+        res = verify_single_email("invalid_inbox@active-domain.com", provider=mock_provider)
+
+        self.assertEqual(res["classification"], "Likely to bounce")
+        self.assertEqual(res["status_category"], "invalid")
+        self.assertIn("undeliverable", res["reason"])
+
+    # --------------------------------------------------------------------------
+    # 3. 'Unknown' Outcomes
+    # --------------------------------------------------------------------------
+    @patch("verifier.check_domain_dns")
+    def test_unknown_when_render_blocks_port_25_and_no_provider(self, mock_dns):
+        """
+        On Render (port 25 blocked) without an external provider API key:
+        Domain routing is verified, but recipient mailbox existence cannot be determined.
+        Must be classified honestly as 'Unknown' rather than fabricating deliverability.
+        """
+        mock_dns.return_value = {
+            "domain": "github.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["github-com.mail.protection.outlook.com"],
+            "primary_mx": "github-com.mail.protection.outlook.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        res = verify_single_email("support@github.com", perform_smtp=False)
+        self.assertEqual(res["classification"], "Unknown")
+        self.assertEqual(res["status_category"], "unknown")
+        self.assertEqual(res["short_reason"], "MX records found; mailbox status could not be confirmed.")
+        self.assertIn("mailbox existence could not be confirmed", res["reason"])
+
+    @patch("verifier.probe_smtp_recipient")
+    @patch("verifier.check_domain_dns")
+    def test_unknown_catch_all_mail_server(self, mock_dns, mock_probe):
+        """Catch-all mail servers accept any address; mailbox deliverability is Unknown."""
+        mock_dns.return_value = {
+            "domain": "catchall-domain.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.catchall-domain.com"],
+            "primary_mx": "mail.catchall-domain.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        mock_probe.return_value = {
+            "smtp_status": "inconclusive",
+            "smtp_attempted": True,
+            "is_catch_all": True,
+            "smtp_response_code": 250,
+            "smtp_response_message": "250 OK",
+            "smtp_server": "mail.catchall-domain.com",
+            "smtp_duration_ms": 150.0,
+            "smtp_explanation": "Domain is configured as catch-all; individual mailbox existence cannot be proven."
+        }
+
+        with patch.dict(os.environ, {"ENABLE_SMTP_PROBE": "true"}):
+            res = verify_single_email("any_address@catchall-domain.com", perform_smtp=True)
+
+        self.assertEqual(res["classification"], "Unknown")
+        self.assertEqual(res["status_category"], "unknown")
+        self.assertIn("catch-all", res["reason"].lower())
+
+    @patch("verifier.check_domain_dns")
+    def test_unknown_disposable_domain(self, mock_dns):
+        """Temporary or disposable email domains must be classified as 'Unknown'."""
+        mock_dns.return_value = {
+            "domain": "mailinator.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.mailinator.com"],
+            "primary_mx": "mail.mailinator.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        res = verify_single_email("test.user@mailinator.com")
+        self.assertEqual(res["classification"], "Unknown")
+        self.assertEqual(res["status_category"], "unknown")
+        self.assertIn("disposable", res["reason"].lower())
+
+    @patch("verifier.check_domain_dns")
+    def test_unknown_dns_timeout(self, mock_dns):
+        """Temporary DNS query timeout must be classified as 'Unknown', never a false bounce."""
+        mock_dns.return_value = {
+            "domain": "slow-dns.com",
+            "domain_status": "dns_timeout",
+            "mx_status": "dns_timeout",
+            "mx_records": [],
+            "primary_mx": None,
+            "is_null_mx": False,
+            "error": "DNS resolution timed out."
+        }
+        res = verify_single_email("user@slow-dns.com")
+        self.assertEqual(res["classification"], "Unknown")
+        self.assertEqual(res["status_category"], "unknown")
+        self.assertIn("temporary issue", res["reason"].lower())
+
+    # --------------------------------------------------------------------------
+    # 4. Batch Processing with All 3 Outcomes
+    # --------------------------------------------------------------------------
+    @patch("verifier.verify_single_email")
+    def test_batch_verification_demonstrates_all_three_outcomes(self, mock_verify):
+        """A batch of mixed emails must properly aggregate into all three outcome metrics."""
+        mock_verify.side_effect = [
+            # 1. Likely to be delivered
+            {
+                "email": "valid@deliverable.org",
+                "normalized_email": "valid@deliverable.org",
+                "syntax_valid": True,
+                "domain_status": "exists",
+                "mx_status": "mx_found",
+                "is_null_mx": False,
+                "is_disposable": False,
+                "classification": "Likely to be delivered",
+                "status_category": "valid",
+                "reason": "Recipient inbox verified deliverable.",
+                "short_reason": "Recipient inbox verified deliverable."
+            },
+            # 2. Likely to bounce (invalid syntax)
+            {
+                "email": "bad..syntax@@domain",
+                "normalized_email": "bad..syntax@@domain",
+                "syntax_valid": False,
+                "domain_status": "untested",
+                "mx_status": "untested",
+                "is_null_mx": False,
+                "is_disposable": False,
+                "classification": "Likely to bounce",
+                "status_category": "invalid",
+                "reason": "Invalid email syntax. Likely to bounce.",
+                "short_reason": "Invalid email syntax. Likely to bounce."
+            },
+            # 3. Likely to bounce (NXDOMAIN)
+            {
+                "email": "user@nonexistent-domain.xyz",
+                "normalized_email": "user@nonexistent-domain.xyz",
+                "syntax_valid": True,
+                "domain_status": "nonexistent",
+                "mx_status": "none",
+                "is_null_mx": False,
+                "is_disposable": False,
+                "classification": "Likely to bounce",
+                "status_category": "invalid",
+                "reason": "The domain does not exist in DNS (NXDOMAIN).",
+                "short_reason": "The domain does not exist in DNS (NXDOMAIN)."
+            },
+            # 4. Unknown (Render unverified mailbox)
+            {
+                "email": "contact@google.com",
+                "normalized_email": "contact@google.com",
+                "syntax_valid": True,
+                "domain_status": "exists",
+                "mx_status": "mx_found",
+                "is_null_mx": False,
+                "is_disposable": False,
+                "classification": "Unknown",
+                "status_category": "unknown",
+                "reason": "Domain mail routing is active, but recipient mailbox could not be confirmed.",
+                "short_reason": "MX records found; mailbox status could not be confirmed."
+            }
+        ]
+
+        batch = [
+            "valid@deliverable.org",
+            "bad..syntax@@domain",
+            "user@nonexistent-domain.xyz",
+            "contact@google.com"
+        ]
+
+        result = verify_email_list(batch)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["total"], 4)
+        summary = result["summary"]
+
+        self.assertEqual(summary["likely_to_deliver"], 1)
+        self.assertEqual(summary["likely_to_bounce"], 2)
+        self.assertEqual(summary["unknown"], 1)
+        self.assertEqual(summary["valid"], 1)
+        self.assertEqual(summary["invalid"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
