@@ -309,6 +309,122 @@ class TestProviderIntegration(unittest.TestCase):
         self.assertEqual(res_disposable["status"], "risky")
         self.assertTrue(res_disposable["is_disposable"])
 
+    @patch("urllib.request.urlopen")
+    def test_hunter_api_undeliverable(self, mock_urlopen):
+        """Hunter.io confirming address undeliverable."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "data": {
+                "result": "undeliverable",
+                "status": "invalid",
+                "score": 5,
+                "disposable": false,
+                "accept_all": false
+            }
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        provider = HunterProvider(api_key="test_hunter_key")
+        result = provider.verify_recipient("baduser@huntertest.com")
+
+        self.assertEqual(result["status"], "undeliverable")
+        self.assertFalse(result["is_deliverable"])
+        self.assertIn("undeliverable", result["reason"].lower())
+
+    @patch("urllib.request.urlopen")
+    def test_zerobounce_api_deliverable(self, mock_urlopen):
+        """ZeroBounce confirming address deliverable."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "address": "gooduser@zbtest.com",
+            "status": "valid",
+            "sub_status": ""
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        provider = ZeroBounceProvider(api_key="test_zb_key")
+        result = provider.verify_recipient("gooduser@zbtest.com")
+
+        self.assertEqual(result["status"], "deliverable")
+        self.assertTrue(result["is_deliverable"])
+        self.assertEqual(result["provider"], "zerobounce")
+
+    @patch("urllib.request.urlopen")
+    def test_zerobounce_api_undeliverable(self, mock_urlopen):
+        """ZeroBounce confirming address invalid/undeliverable."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "address": "nonexistent@zbtest.com",
+            "status": "invalid",
+            "sub_status": "mailbox_not_found"
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        provider = ZeroBounceProvider(api_key="test_zb_key")
+        result = provider.verify_recipient("nonexistent@zbtest.com")
+
+        self.assertEqual(result["status"], "undeliverable")
+        self.assertFalse(result["is_deliverable"])
+
+    @patch("urllib.request.urlopen")
+    def test_provider_auth_failure_401(self, mock_urlopen):
+        """HTTP 401 Unauthorized returns unknown status with clear explanation."""
+        http_err = urllib.error.HTTPError(
+            url="https://api.abstractapi.com",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=None
+        )
+        mock_urlopen.side_effect = http_err
+
+        provider = AbstractAPIProvider(api_key="invalid_or_expired_key")
+        result = provider.verify_recipient("user@company.com")
+
+        self.assertEqual(result["status"], "unknown")
+        self.assertIn("invalid or unauthorized", result["reason"].lower())
+
+    @patch("urllib.request.urlopen")
+    def test_provider_network_timeout(self, mock_urlopen):
+        """Network error or timeout when contacting provider returns unknown."""
+        mock_urlopen.side_effect = TimeoutError("Connection to provider timed out")
+
+        provider = AbstractAPIProvider(api_key="valid_key")
+        result = provider.verify_recipient("user@company.com")
+
+        self.assertEqual(result["status"], "unknown")
+        self.assertIn("timed out", result["reason"].lower())
+
+    def test_get_verification_provider_factory_env_vars(self):
+        """Provider factory instantiates correct provider class based on environment variables."""
+        with patch.dict(os.environ, {"EMAIL_VERIFICATION_PROVIDER": "hunter", "EMAIL_VERIFICATION_API_KEY": "hk_123"}):
+            p = get_verification_provider()
+            self.assertIsInstance(p, HunterProvider)
+            self.assertEqual(p.api_key, "hk_123")
+
+        with patch.dict(os.environ, {"EMAIL_VERIFICATION_PROVIDER": "zerobounce", "EMAIL_VERIFICATION_API_KEY": "zb_456"}):
+            p = get_verification_provider()
+            self.assertIsInstance(p, ZeroBounceProvider)
+            self.assertEqual(p.api_key, "zb_456")
+
+        with patch.dict(os.environ, {"EMAIL_VERIFICATION_PROVIDER": "abstract", "EMAIL_VERIFICATION_API_KEY": "ab_789"}):
+            p = get_verification_provider()
+            self.assertIsInstance(p, AbstractAPIProvider)
+            self.assertEqual(p.api_key, "ab_789")
+
+    def test_get_verification_provider_missing_key_falls_back_to_local(self):
+        """When EMAIL_VERIFICATION_API_KEY is unset or empty, factory falls back to LocalFallbackProvider."""
+        with patch.dict(os.environ, {"EMAIL_VERIFICATION_PROVIDER": "abstract", "EMAIL_VERIFICATION_API_KEY": ""}):
+            p = get_verification_provider()
+            self.assertIsInstance(p, LocalFallbackProvider)
+
+        with patch.dict(os.environ, clear=True):
+            p = get_verification_provider()
+            self.assertIsInstance(p, LocalFallbackProvider)
+
 
 class TestClassificationLogic(unittest.TestCase):
     """Test 7-stage classification rules into Valid, Invalid, Risky, and Unknown."""

@@ -774,6 +774,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const smtpSt = (probe.smtp_status || item.smtp_status || 'disabled').toUpperCase();
     const smtpExp = probe.smtp_explanation || item.reason || '';
 
+    const provInfo = item.provider_info || {};
+    const provName = provInfo.provider || 'Local Engine';
+    const provStatus = provInfo.status || item.recipient_status || 'untested';
+    const provScore = provInfo.score !== null && provInfo.score !== undefined ? `${(provInfo.score * 100).toFixed(0)}%` : 'N/A';
+    const provReason = provInfo.reason || (item.provider_info ? 'Provider active' : 'Recipient verification provider API key not configured. Domain routing verified, but recipient inbox remains unverified on cloud host.');
+
     const mxListHtml = (item.mx_records && item.mx_records.length > 0)
       ? item.mx_records.map(r => `<div class="mx-pill-item">${escapeHtml(r)}</div>`).join('')
       : '<span class="text-muted" style="font-size:0.75rem;">None published</span>';
@@ -835,7 +841,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <!-- Stage 3: SMTP Mailbox Probe -->
       <div class="modal-stage-card">
         <div class="stage-card-title">
-          <span>Stage 3: SMTP Mailbox Probe</span>
+          <span>Stage 5: SMTP Mailbox Probe (Port 25)</span>
           <span class="indicator-pill ${probe.smtp_status === 'accepted' ? 'pill-accepted' : (probe.smtp_status === 'rejected' ? 'pill-rejected' : 'pill-disabled')}">
             ${escapeHtml(smtpSt)}
           </span>
@@ -857,6 +863,27 @@ document.addEventListener('DOMContentLoaded', () => {
             <strong>Explanation:</strong> ${escapeHtml(smtpExp)}
           </div>
         ` : ''}
+      </div>
+
+      <!-- Stage 6: HTTPS Recipient Verification Provider -->
+      <div class="modal-stage-card">
+        <div class="stage-card-title">
+          <span>Stage 6: HTTPS Recipient Verification Provider (Port 443)</span>
+          <span class="indicator-pill ${provStatus === 'deliverable' ? 'pill-accepted' : (provStatus === 'undeliverable' ? 'pill-rejected' : 'pill-disabled')}">
+            ${escapeHtml(provStatus)}
+          </span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Active Provider:</span>
+          <span class="modal-meta-val"><code>${escapeHtml(provName.toUpperCase())}</code></span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Deliverability Score:</span>
+          <span class="modal-meta-val">${escapeHtml(provScore)}</span>
+        </div>
+        <div style="margin-top:0.45rem; font-size:0.75rem; color:var(--text-muted);">
+          <strong>Provider Diagnostic:</strong> ${escapeHtml(provReason)}
+        </div>
       </div>
 
       <!-- Understanding SMTP Timeouts & Provider Protections -->

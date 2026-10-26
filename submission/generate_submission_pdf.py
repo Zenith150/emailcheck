@@ -299,7 +299,7 @@ def create_submission_pdf(
     story.append(Paragraph("6. Automated Test Suite Summary", h2_style))
     test_text = (
         "The automated test suite across <code>tests/test_verifier.py</code>, <code>tests/test_smtp_probe.py</code>, and "
-        "<code>tests/test_api.py</code> was executed and passed completely with <b>83 passed tests in 0.49 seconds</b>:<br/>"
+        "<code>tests/test_api.py</code> was executed and passed completely with <b>90 passed tests in 0.88 seconds</b>:<br/>"
         "• Authoritative 7-Stage Pipeline definition & regression verification against LaTeX leaks: <b>PASSED</b><br/>"
         "• RFC 5322 Syntax validation & Local-part preserving Normalization: <b>PASSED</b><br/>"
         "• Disposable domain detection (Mailinator, Sharklasers, GuerrillaMail, etc.): <b>PASSED</b><br/>"
