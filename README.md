@@ -2,11 +2,10 @@
 
 EmailCheck is a full-stack, responsive web application designed for non-invasive email verification and deliverability diagnostics. It resolves cloud hosting restrictions—such as Render's outbound TCP port 25 block—by combining a local 7-stage diagnostic pipeline, an optional genuine SMTP recipient probing module (`smtp_probe.py`) with an intelligent circuit breaker, and reputable email verification APIs operating over secure HTTPS (port 443).
 
-Addresses are classified into four transparent, conservative statuses:
-1. **Valid** (Green) — Syntax valid, active mail routing, not disposable, and recipient inbox confirmed deliverable (via HTTPS provider or genuine SMTP 250 OK).
-2. **Invalid** (Red) — Malformed syntax, nonexistent domain (`NXDOMAIN`), RFC 7505 Null MX, explicit SMTP rejection (550), or confirmed undeliverable inbox.
-3. **Risky** (Amber) — Disposable/temporary domain, catch-all mail server, role account, or unverified recipient inbox (when running in Local Fallback mode without third-party API keys or SMTP access).
-4. **Unknown** (Slate) — DNS query timeout, server error, provider API rate limit (429), temporary SMTP greylisting (450), or hosting network block.
+Addresses are classified into the three required assignment outcomes:
+1. **Likely to be delivered** (Green) — Syntax valid, active mail routing, not disposable, and recipient inbox confirmed deliverable (via HTTPS provider or genuine SMTP 250 OK). Accompanied by a transparent disclaimer that server-level acceptance does not guarantee final inbox arrival (anti-spam filtering, mailbox quotas).
+2. **Likely to bounce** (Red) — Malformed syntax, nonexistent domain (`NXDOMAIN`), RFC 7505 Null MX (`0 .`), domain without MX or A routing, explicit SMTP rejection (550), or confirmed undeliverable inbox.
+3. **Unknown** (Slate) — Unverified recipient mailbox (when running in local mode without third-party API keys or when SMTP port 25 is blocked on cloud hosts like Render), catch-all mail servers (which accept any mailbox indiscriminately), disposable email domains (temporary/short-lived inboxes), DNS timeouts, nameserver errors, provider API rate limits (429), or temporary SMTP greylisting (450).
 
 ---
 
@@ -63,7 +62,7 @@ EmailCheck v2.2 solves this restriction cleanly and robustly without attempting 
    - **Local Fallback**: Zero-dependency local verification when no third-party API key is configured.
 
 4. **Transparent Fallback & Honest Reporting:**
-   - If no provider API key is configured and SMTP is unavailable, EmailCheck executes local syntax validation, domain normalization, disposable domain filtering, and DNS MX checks, while honestly classifying recipient inbox existence as unverified (`Risky`) rather than falsely claiming inbox delivery.
+   - If no provider API key is configured and SMTP is unavailable, EmailCheck executes local syntax validation, domain normalization, disposable domain filtering, and DNS MX checks, while honestly classifying recipient inbox existence as unverified (`Unknown`) rather than falsely claiming inbox delivery or guessing invalidity.
    - If a provider exceeds rate limits or quota (HTTP 429), the system marks the recipient check as `Unknown` rather than crashing or returning false positives.
 
 ---
@@ -95,7 +94,7 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
 - **NEVER SENDS MESSAGES:** The protocol sequence is strictly limited to recipient probing and is always aborted cleanly with `RSET` and `QUIT`.
 - **RFC 7505 Null MX Guard:** Domains with Null MX records (`0 .`) are rejected immediately before any network socket is opened.
 - **Safe Circuit Breaker:** In environments where outbound port 25 is blocked (Render), the first socket timeout trips an in-memory circuit breaker, instantaneously marking subsequent addresses in the batch as `unavailable` to prevent timeouts.
-- **Catch-All Domain Detection:** Probes a randomized non-existent address (`_emailcheck_verify_probe_test_@domain`) to verify whether the server accepts all recipients indiscriminately. Catch-all servers are safely classified as `inconclusive` (`Risky`).
+- **Catch-All Domain Detection:** Probes a randomized non-existent address (`_emailcheck_verify_probe_test_@domain`) to verify whether the server accepts all recipients indiscriminately. Catch-all servers are safely classified as `inconclusive` (`Unknown`).
 - **Response Sanitization:** All SMTP reply codes and messages are sanitized to strip CRLF control characters and bounded to 200 characters before inclusion in API or UI outputs.
 
 ---
@@ -109,15 +108,17 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
   - DNS resolution checking active MX records, `NXDOMAIN` existence, RFC 7505 Null MX (`0 .`), and RFC 5321 implicit MX fallback (A/AAAA).
   - Optional genuine SMTP recipient probing (`smtp_probe.py`) with Render fallback.
   - Provider-based recipient inbox deliverability over HTTPS (port 443).
-- **Conservative Deliverability Classification:**
+- **Strict 3-Outcome Deliverability Classification:**
+  - Addresses are strictly classified into **Likely to be delivered**, **Likely to bounce**, or **Unknown**.
   - Clearly differentiates between **domain mail routing** and **recipient mailbox existence**.
-  - Conservatively treats SMTP 250 response as server-level recipient acceptance (not guaranteed inbox delivery due to spam filters/quotas).
-  - Marks temporary failures (SMTP 450 Greylisting) as `inconclusive` (`Unknown`) rather than `Invalid`.
+  - Conservatively treats SMTP 250 response as server-level recipient acceptance (warning that final downstream delivery is not guaranteed due to spam filters/quotas).
+  - Classifies unverified recipient inboxes (when SMTP is unavailable/disabled and no provider key is configured) as **Unknown** with detailed, actionable diagnostics.
+  - Marks temporary failures (SMTP 450 Greylisting) and catch-all servers as **Unknown**.
 - **Batch Processing with Memoization:** Efficient in-memory caching prevents redundant DNS lookups and HTTP requests for duplicate domains and addresses within the same batch (up to 100 emails).
 - **Modern Responsive Dashboard:**
   - Real-time address counter (up to 100 per batch).
-  - Five summary metric cards: **Total**, **Valid**, **Invalid**, **Risky**, and **Unknown**.
-  - Interactive filter tabs (All, Valid, Invalid, Risky, Unknown) and real-time search box.
+  - Four summary metric cards: **Total**, **Likely to be Delivered**, **Likely to Bounce**, and **Unknown**.
+  - Interactive filter tabs (All, Likely to Deliver, Likely to Bounce, Unknown) and real-time search box.
   - Sorting and pagination for large batches.
   - Collapsible per-row diagnostics showing DNS MX, HTTP Provider, and detailed SMTP Probe outputs.
   - Dedicated **Domain Diagnostics** lookup tool.
@@ -138,7 +139,7 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
   - Recipient Verification: HTTPS REST API (Abstract API / Hunter / ZeroBounce) via Python `urllib.request`.
   - Disposable Detection: Curated dataset of 200+ known disposable and temporary email domains.
 - **Production WSGI:** `gunicorn`.
-- **Testing:** Python `unittest` suite (65 automated unit, integration, and mocking tests).
+- **Testing:** Python `unittest` suite (69 automated unit, integration, and mocking tests).
 - **Documentation & PDF Generation:** ReportLab (`submission/EmailCheck_Project_Submission.pdf`).
 
 ---
@@ -152,37 +153,37 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
 [ Rate Limiter & Sanitizer ]
              │
              ▼
-[ 1. Syntax Validation ] ─────────(Malformed)─────────► [ Invalid ]
+[ 1. Syntax Validation ] ─────────(Malformed)─────────► [ Likely to bounce ]
              │
           (Valid)
              ▼
 [ 2. Normalization ] (trim whitespace, lowercase domain, preserve local part)
              │
              ▼
-[ 3. Disposable Domain Check ] ───(Disposable Domain)─► [ Risky ]
+[ 3. Disposable Domain Check ] ───(Disposable Domain)─► [ Unknown ]
              │
         (Not Disposable)
              ▼
-[ 4. DNS Domain Check ] ──────────(NXDOMAIN)──────────► [ Invalid ]
+[ 4. DNS Domain Check ] ──────────(NXDOMAIN)──────────► [ Likely to bounce ]
              │                    (DNS Timeout/Error)─► [ Unknown ]
          (Exists)
              ▼
 [ 5. MX Record Validation ]
-             ├── RFC 7505 Null MX ("0 .") ────────────► [ Invalid ]
-             ├── No MX & No A/AAAA Record ────────────► [ Invalid ]
+             ├── RFC 7505 Null MX ("0 .") ────────────► [ Likely to bounce ]
+             ├── No MX & No A/AAAA Record ────────────► [ Likely to bounce ]
              └── MX Found (or Implicit MX A/AAAA)
                         │
                         ▼
 [ 6. Recipient Inbox Verification ]
-             ├── Optional SMTP Probe (Port 25) ───► [ 250 OK -> Valid / 550 -> Invalid / 450 -> Unknown ]
+             ├── Optional SMTP Probe (Port 25) ───► [ 250 OK -> Likely to be delivered / 550 -> Likely to bounce / 450 -> Unknown ]
              │   └── (If port 25 blocked or disabled, falls back cleanly to HTTPS provider)
              └── HTTPS Provider Check (Port 443)
-                 ├── Undeliverable Mailbox ───────────► [ Invalid ]
-                 ├── Catch-All Server Detected ───────► [ Risky ]
+                 ├── Undeliverable Mailbox ───────────► [ Likely to bounce ]
+                 ├── Catch-All Server Detected ───────► [ Unknown ]
                  ├── Quota Exceeded / Rate Limit (429)► [ Unknown ]
                  ├── Network / API Timeout ───────────► [ Unknown ]
-                 ├── No Provider Key Configured ──────► [ Risky ] (Domain verified, inbox unverified)
-                 └── Deliverable Mailbox ─────────────► [ Valid ]
+                 ├── No Provider Key Configured ──────► [ Unknown ] (Domain verified, inbox unverified)
+                 └── Deliverable Mailbox ─────────────► [ Likely to be delivered ]
                         │
                         ▼
 [ 7. Result Classification & Transparent Explanation ]
@@ -194,10 +195,9 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
 
 | Classification | Badge | Meaning | Underlying Conditions |
 | :--- | :--- | :--- | :--- |
-| **Valid** | <font color="#047857">**Valid**</font> | High confidence deliverability. | • RFC syntax is valid<br>• Domain exists with active MX routing<br>• Domain is not a known disposable provider<br>• Recipient accepted during SMTP handshake (250 OK) OR confirmed deliverable via HTTPS provider API |
-| **Invalid** | <font color="#b91c1c">**Invalid**</font> | Mail will bounce or be rejected. | • Malformed syntax (missing `@`, consecutive dots, invalid characters)<br>• Nonexistent domain (`NXDOMAIN`)<br>• RFC 7505 Null MX record published (`0 .`)<br>• Domain has no MX and no A/AAAA records<br>• Remote server explicitly rejected recipient during SMTP handshake (550)<br>• Provider API confirmed recipient inbox does not exist |
-| **Risky** | <font color="#b45309">**Risky**</font> | Mail may bounce, be temporary, or cannot be confirmed at the mailbox level. | • Known disposable/temporary email domain (e.g. Mailinator, GuerrillaMail)<br>• Catch-all mail server (accepts all addresses indiscriminately)<br>• Role-based account (`admin@`, `support@`)<br>• Local fallback: Domain MX is active, but recipient inbox is unverified (no API key configured and SMTP unavailable) |
-| **Unknown** | <font color="#475569">**Unknown**</font> | Deliverability cannot be reliably determined. | • DNS query timeout or DNS server failure (`SERVFAIL`)<br>• Temporary SMTP rejection (450 Greylisting)<br>• Hosting network blocked outbound port 25 (Render fallback)<br>• Provider API rate limit (HTTP 429) or monthly quota reached<br>• Provider network timeout or transient connection error |
+| **Likely to be delivered** | <font color="#047857">**Likely to be Delivered**</font> | High confidence deliverability. | • RFC syntax is valid<br>• Domain exists with active MX routing<br>• Domain is not a known disposable provider<br>• Recipient accepted during genuine SMTP handshake (250 OK) OR confirmed deliverable via HTTPS provider API<br>*(Warning: Downstream inbox delivery is not guaranteed due to recipient spam filters or mailbox quotas)* |
+| **Likely to bounce** | <font color="#b91c1c">**Likely to Bounce**</font> | Mail will bounce or be permanently rejected. | • Malformed syntax (missing `@`, consecutive dots, invalid characters)<br>• Nonexistent domain (`NXDOMAIN`)<br>• RFC 7505 Null MX record published (`0 .`)<br>• Domain has no MX and no A/AAAA records<br>• Remote server explicitly rejected recipient during SMTP handshake (550)<br>• Provider API confirmed recipient inbox does not exist |
+| **Unknown** | <font color="#475569">**Unknown**</font> | Deliverability cannot be reliably determined. | • Domain MX routing is active, but specific recipient inbox existence could not be confirmed (SMTP probe unavailable on host and no HTTPS verification provider configured)<br>• Known disposable/temporary email domain (e.g. Mailinator)<br>• Catch-all mail server (accepts all addresses indiscriminately)<br>• DNS query timeout or DNS server failure (`SERVFAIL`)<br>• Temporary SMTP rejection (450 Greylisting)<br>• Hosting network blocked outbound port 25 (Render fallback)<br>• Provider API rate limit (HTTP 429) or monthly quota reached |
 
 ---
 
@@ -231,7 +231,7 @@ EmailCheck supports multiple providers through standard environment variables:
 
 ### 4. Local Fallback (No Key Required)
 - If `EMAIL_VERIFICATION_API_KEY` is omitted or set to `local`, EmailCheck runs the complete local pipeline: syntax validation, normalization, 200+ disposable domain check, and DNS MX / Null MX checks.
-- Recipient deliverability is safely classified as `Risky` (unverified inbox), clearly distinguishing domain routing from recipient inbox confirmation.
+- Recipient deliverability is safely classified as **Unknown** (unverified inbox), clearly distinguishing domain routing from recipient inbox confirmation without throwing errors or requiring API keys.
 
 ---
 
@@ -392,10 +392,12 @@ Ran 65 tests in 0.349s: OK
     "total": 4,
     "summary": {
       "total": 4,
+      "likely_to_deliver": 1,
+      "likely_to_bounce": 2,
+      "unknown": 1,
       "valid": 1,
       "invalid": 2,
-      "risky": 1,
-      "unknown": 0
+      "risky": 0
     },
     "results": [
       {
@@ -424,7 +426,9 @@ Ran 65 tests in 0.349s: OK
           "provider": "abstract",
           "details": "Inbox verified deliverable."
         },
-        "classification": "Valid",
+        "classification": "Likely to be delivered",
+        "outcome": "Likely to be delivered",
+        "status_category": "valid",
         "reason": "Syntax valid, active MX routing verified, and recipient inbox confirmed deliverable via HTTPS provider.",
         "duration_ms": 42.1,
         "checked_at": "2026-10-26T21:25:00.000Z"

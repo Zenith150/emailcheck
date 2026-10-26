@@ -329,8 +329,8 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsSection.style.display = 'block';
 
     const total = Number(summary.total) || 0;
-    const valid = summary.valid !== undefined ? Number(summary.valid) : Number(summary.likely_to_deliver || 0);
-    const invalid = summary.invalid !== undefined ? Number(summary.invalid) : Number(summary.likely_to_bounce || 0);
+    const valid = summary.likely_to_deliver !== undefined ? Number(summary.likely_to_deliver) : Number(summary.valid || 0);
+    const invalid = summary.likely_to_bounce !== undefined ? Number(summary.likely_to_bounce) : Number(summary.invalid || 0);
     const risky = Number(summary.risky) || 0;
     const unknown = Number(summary.unknown) || 0;
 
@@ -373,10 +373,10 @@ document.addEventListener('DOMContentLoaded', () => {
       let matchesFilter = false;
       if (filter === 'all') {
         matchesFilter = true;
-      } else if (filter === 'valid' || filter === 'likely to be delivered') {
-        matchesFilter = (cls === 'valid' || cls === 'likely to be delivered' || cat === 'valid');
+      } else if (filter === 'valid' || filter === 'likely to be delivered' || filter === 'likely to deliver') {
+        matchesFilter = (cls === 'valid' || cls === 'likely to be delivered' || cat === 'valid' || cat === 'likely_to_deliver');
       } else if (filter === 'invalid' || filter === 'likely to bounce') {
-        matchesFilter = (cls === 'invalid' || cls === 'likely to bounce' || cat === 'invalid');
+        matchesFilter = (cls === 'invalid' || cls === 'likely to bounce' || cat === 'invalid' || cat === 'likely_to_bounce');
       } else if (filter === 'risky') {
         matchesFilter = (cls === 'risky' || cat === 'risky');
       } else if (filter === 'unknown') {
@@ -398,11 +398,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (currentSort === 'email-desc') {
       filtered.sort((a, b) => (b.email || '').localeCompare(a.email || ''));
     } else if (currentSort === 'class-valid') {
-      const order = { 'valid': 1, 'risky': 2, 'unknown': 3, 'invalid': 4 };
-      filtered.sort((a, b) => (order[(a.status_category || '').toLowerCase()] || 99) - (order[(b.status_category || '').toLowerCase()] || 99));
+      const order = { 'valid': 1, 'likely to be delivered': 1, 'risky': 2, 'unknown': 3, 'invalid': 4, 'likely to bounce': 4 };
+      filtered.sort((a, b) => (order[(a.status_category || '').toLowerCase()] || order[(a.classification || '').toLowerCase()] || 99) - (order[(b.status_category || '').toLowerCase()] || order[(b.classification || '').toLowerCase()] || 99));
     } else if (currentSort === 'class-invalid') {
-      const order = { 'invalid': 1, 'risky': 2, 'unknown': 3, 'valid': 4 };
-      filtered.sort((a, b) => (order[(a.status_category || '').toLowerCase()] || 99) - (order[(b.status_category || '').toLowerCase()] || 99));
+      const order = { 'invalid': 1, 'likely to bounce': 1, 'risky': 2, 'unknown': 3, 'valid': 4, 'likely to be delivered': 4 };
+      filtered.sort((a, b) => (order[(a.status_category || '').toLowerCase()] || order[(a.classification || '').toLowerCase()] || 99) - (order[(b.status_category || '').toLowerCase()] || order[(b.classification || '').toLowerCase()] || 99));
     }
 
     return filtered;
@@ -972,9 +972,8 @@ document.addEventListener('DOMContentLoaded', () => {
     history.forEach(session => {
       const dateStr = new Date(session.timestamp).toLocaleString();
       const summary = session.summary || {};
-      const valid = summary.valid || 0;
-      const invalid = summary.invalid || 0;
-      const risky = summary.risky || 0;
+      const valid = summary.likely_to_deliver !== undefined ? summary.likely_to_deliver : (summary.valid || 0);
+      const invalid = summary.likely_to_bounce !== undefined ? summary.likely_to_bounce : (summary.invalid || 0);
       const unknown = summary.unknown || 0;
 
       const card = document.createElement('div');
@@ -991,9 +990,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ${dateStr} (${session.total} addresses)
           </div>
           <div class="session-pills">
-            <span class="session-pill" style="background:#ecfdf5; color:#065f46;">${valid} Valid</span>
-            <span class="session-pill" style="background:#fef2f2; color:#991b1b;">${invalid} Invalid</span>
-            <span class="session-pill" style="background:#fffbeb; color:#92400e;">${risky} Risky</span>
+            <span class="session-pill" style="background:#ecfdf5; color:#065f46;">${valid} Likely to Deliver</span>
+            <span class="session-pill" style="background:#fef2f2; color:#991b1b;">${invalid} Likely to Bounce</span>
             <span class="session-pill" style="background:#f1f5f9; color:#475569;">${unknown} Unknown</span>
           </div>
         </div>

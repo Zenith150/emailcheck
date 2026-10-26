@@ -321,7 +321,7 @@ class TestClassificationLogic(unittest.TestCase):
             is_disposable=False,
             syntax_error="Missing @"
         )
-        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cls, "Likely to bounce")
         self.assertEqual(cat, "invalid")
         self.assertIn("Invalid email syntax", reason)
 
@@ -332,7 +332,7 @@ class TestClassificationLogic(unittest.TestCase):
             mx_status="none",
             is_disposable=False
         )
-        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cls, "Likely to bounce")
         self.assertEqual(cat, "invalid")
         self.assertIn("NXDOMAIN", reason)
 
@@ -343,7 +343,7 @@ class TestClassificationLogic(unittest.TestCase):
             mx_status="null_mx",
             is_disposable=False
         )
-        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cls, "Likely to bounce")
         self.assertEqual(cat, "invalid")
         self.assertIn("Null MX", reason)
 
@@ -354,7 +354,7 @@ class TestClassificationLogic(unittest.TestCase):
             mx_status="no_records",
             is_disposable=False
         )
-        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cls, "Likely to bounce")
         self.assertEqual(cat, "invalid")
         self.assertIn("no MX or A records", reason)
 
@@ -377,8 +377,8 @@ class TestClassificationLogic(unittest.TestCase):
             mx_status="mx_found",
             is_disposable=True
         )
-        self.assertEqual(cls, "Risky")
-        self.assertEqual(cat, "risky")
+        self.assertEqual(cls, "Unknown")
+        self.assertEqual(cat, "unknown")
         self.assertIn("disposable", reason.lower())
 
     def test_provider_deliverable_classification(self):
@@ -395,7 +395,7 @@ class TestClassificationLogic(unittest.TestCase):
             is_disposable=False,
             provider_res=provider_res
         )
-        self.assertEqual(cls, "Valid")
+        self.assertEqual(cls, "Likely to be delivered")
         self.assertEqual(cat, "valid")
         self.assertIn("confirmed deliverable", reason)
 
@@ -413,7 +413,7 @@ class TestClassificationLogic(unittest.TestCase):
             is_disposable=False,
             provider_res=provider_res
         )
-        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cls, "Likely to bounce")
         self.assertEqual(cat, "invalid")
         self.assertIn("undeliverable", reason)
 
@@ -431,9 +431,81 @@ class TestClassificationLogic(unittest.TestCase):
             is_disposable=False,
             provider_res=provider_res
         )
-        self.assertEqual(cls, "Risky")
-        self.assertEqual(cat, "risky")
-        self.assertIn("unverified", reason.lower())
+        self.assertEqual(cls, "Unknown")
+        self.assertEqual(cat, "unknown")
+        self.assertIn("unknown", reason.lower())
+
+    def test_smtp_accepted_classification(self):
+        smtp_info = {
+            "smtp_attempted": True,
+            "smtp_status": "accepted",
+            "smtp_response_code": 250,
+            "smtp_explanation": "Recipient 250 OK accepted"
+        }
+        cls, cat, reason = classify_result(
+            syntax_valid=True,
+            domain_status="exists",
+            mx_status="mx_found",
+            is_disposable=False,
+            smtp_info=smtp_info
+        )
+        self.assertEqual(cls, "Likely to be delivered")
+        self.assertEqual(cat, "valid")
+        self.assertIn("accepted recipient in SMTP handshake", reason)
+        self.assertIn("downstream delivery is not guaranteed", reason)
+
+    def test_smtp_rejected_classification(self):
+        smtp_info = {
+            "smtp_attempted": True,
+            "smtp_status": "rejected",
+            "smtp_response_code": 550,
+            "smtp_explanation": "550 5.1.1 User unknown"
+        }
+        cls, cat, reason = classify_result(
+            syntax_valid=True,
+            domain_status="exists",
+            mx_status="mx_found",
+            is_disposable=False,
+            smtp_info=smtp_info
+        )
+        self.assertEqual(cls, "Likely to bounce")
+        self.assertEqual(cat, "invalid")
+        self.assertIn("explicitly rejected recipient", reason)
+
+    def test_smtp_catch_all_classification(self):
+        smtp_info = {
+            "smtp_attempted": True,
+            "smtp_status": "catch_all",
+            "is_catch_all": True,
+            "smtp_explanation": "Server accepts all mailboxes"
+        }
+        cls, cat, reason = classify_result(
+            syntax_valid=True,
+            domain_status="exists",
+            mx_status="mx_found",
+            is_disposable=False,
+            smtp_info=smtp_info
+        )
+        self.assertEqual(cls, "Unknown")
+        self.assertEqual(cat, "unknown")
+        self.assertIn("catch-all", reason.lower())
+
+    def test_smtp_unavailable_classification(self):
+        smtp_info = {
+            "smtp_attempted": True,
+            "smtp_status": "unavailable",
+            "smtp_explanation": "Port 25 blocked by host"
+        }
+        cls, cat, reason = classify_result(
+            syntax_valid=True,
+            domain_status="exists",
+            mx_status="mx_found",
+            is_disposable=False,
+            smtp_info=smtp_info
+        )
+        self.assertEqual(cls, "Unknown")
+        self.assertEqual(cat, "unknown")
+        self.assertIn("Unknown", reason)
 
 
 class TestBatchVerificationAndDeduplication(unittest.TestCase):

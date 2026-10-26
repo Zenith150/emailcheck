@@ -131,7 +131,7 @@ def create_submission_pdf(
             Paragraph("<b>Stack:</b> Python 3.11, Flask 3.1, dnspython, smtplib, HTTPS APIs, Vanilla JS, CSS3", body_style),
         ],
         [
-            Paragraph("<b>Test Suite:</b> 65 / 65 Tests Passed (100% Pass Rate)", body_style),
+            Paragraph("<b>Test Suite:</b> 69 / 69 Tests Passed (100% Pass Rate)", body_style),
             Paragraph("<b>Hosting Target:</b> Render Cloud Web Service (WSGI Gunicorn)", body_style),
         ]
     ]
@@ -154,7 +154,7 @@ def create_submission_pdf(
         "protocol handshakes (<code>EHLO</code> → <code>MAIL FROM</code> → <code>RCPT TO</code> → <code>RSET</code> → <code>QUIT</code>). "
         "To resolve cloud hosting restrictions where outbound TCP port 25 is restricted (such as on Render), the application integrates "
         "a safe circuit breaker that detects network blocks and seamlessly falls back to reputable verification APIs operating over secure HTTPS "
-        "(port 443). Addresses are conservatively classified into <b>Valid</b>, <b>Invalid</b>, <b>Risky</b>, and <b>Unknown</b>."
+        "(port 443). Addresses are classified into the three exact assignment outcomes: <b>Likely to be delivered</b>, <b>Likely to bounce</b>, and <b>Unknown</b>."
     )
     story.append(Paragraph(overview_text, body_style))
 
@@ -207,35 +207,30 @@ def create_submission_pdf(
     story.append(Spacer(1, 5))
 
     # 3. Classification Framework
-    story.append(Paragraph("3. Transparent Classification Framework", h2_style))
+    story.append(Paragraph("3. Transparent Classification Framework (3 Assignment Outcomes)", h2_style))
     class_data = [
         [
-            Paragraph("<b>Classification</b>", table_header_style),
+            Paragraph("<b>Outcome</b>", table_header_style),
             Paragraph("<b>Evaluation Stage & Diagnostics</b>", table_header_style),
             Paragraph("<b>Meaning & Explanation</b>", table_header_style),
         ],
         [
-            Paragraph("<font color='#047857'><b>Valid</b></font>", table_cell_bold),
-            Paragraph("Valid RFC syntax; verified domain with active MX; not disposable; recipient inbox verified via SMTP 250 OK or HTTPS provider.", table_cell_style),
-            Paragraph("Syntax valid, active MX routing verified, and recipient inbox confirmed deliverable (High deliverability confidence).", table_cell_style),
+            Paragraph("<font color='#047857'><b>Likely to be delivered</b></font>", table_cell_bold),
+            Paragraph("Valid RFC syntax; domain exists with active MX; not disposable; recipient inbox verified via SMTP 250 OK or HTTPS provider.", table_cell_style),
+            Paragraph("Syntax valid, MX routing verified, and recipient accepted during handshake. Note: Confirms recipient acceptance; final downstream delivery is not guaranteed due to spam filters or quotas.", table_cell_style),
         ],
         [
-            Paragraph("<font color='#b91c1c'><b>Invalid</b></font>", table_cell_bold),
-            Paragraph("Malformed syntax, NXDOMAIN, RFC 7505 Null MX ('0 .'), missing mail routing, remote SMTP rejection (550), or undeliverable inbox.", table_cell_style),
-            Paragraph("Explicit diagnostic reason provided (e.g. malformed syntax, nonexistent domain, Null MX rejection, or undeliverable mailbox).", table_cell_style),
-        ],
-        [
-            Paragraph("<font color='#b45309'><b>Risky</b></font>", table_cell_bold),
-            Paragraph("Known disposable domain, catch-all server (accepts all addresses), role account, or unverified inbox in Local Fallback mode.", table_cell_style),
-            Paragraph("Distinguishes domain routing from recipient inbox confirmation. Flags temporary inboxes and unverified mailboxes.", table_cell_style),
+            Paragraph("<font color='#b91c1c'><b>Likely to bounce</b></font>", table_cell_bold),
+            Paragraph("Malformed syntax, NXDOMAIN, RFC 7505 Null MX ('0 .'), missing mail routing, remote SMTP rejection (550), or provider undeliverable.", table_cell_style),
+            Paragraph("Explicit permanent diagnostic failure (e.g. invalid syntax, nonexistent domain, Null MX rejection, or confirmed undeliverable mailbox). Likely to bounce.", table_cell_style),
         ],
         [
             Paragraph("<font color='#475569'><b>Unknown</b></font>", table_cell_bold),
-            Paragraph("DNS query timeout, temporary SMTP failure (450 Greylisting), provider API rate limit (429), or host port 25 block.", table_cell_style),
-            Paragraph("Transparent fallback: Never assumes deliverability when diagnostics or network connections are inconclusive.", table_cell_style),
+            Paragraph("Unverified inbox (SMTP blocked / no provider key), catch-all domain, disposable domain, DNS timeout, or temporary SMTP 450 deferral.", table_cell_style),
+            Paragraph("Transparent outcome: Never falsely assumes deliverability when specific recipient mailbox existence cannot be confirmed. Outcome is Unknown.", table_cell_style),
         ]
     ]
-    class_table = Table(class_data, colWidths=[90, 225, 225])
+    class_table = Table(class_data, colWidths=[100, 220, 220])
     class_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), primary_color),
         ('BOX', (0, 0), (-1, -1), 0.5, border_color),
@@ -282,7 +277,7 @@ def create_submission_pdf(
         ],
         [
             Paragraph("<b>User Interface</b>", table_cell_bold),
-            Paragraph("Responsive dashboard, real-time address counter, 5 summary metric cards, status filters, instant search, pagination, collapsible diagnostics, Domain Diagnostics tool, Verification History, and RFC 4180 CSV export.", table_cell_style)
+            Paragraph("Responsive dashboard, real-time address counter, 4 summary metric cards (Total, Likely to Deliver, Likely to Bounce, Unknown), status filters, instant search, pagination, collapsible diagnostics, Domain Diagnostics tool, Verification History, and RFC 4180 CSV export.", table_cell_style)
         ],
         [
             Paragraph("<b>Security & Privacy</b>", table_cell_bold),
@@ -304,7 +299,7 @@ def create_submission_pdf(
     story.append(Paragraph("6. Automated Test Suite Summary", h2_style))
     test_text = (
         "The automated test suite across <code>tests/test_verifier.py</code>, <code>tests/test_smtp_probe.py</code>, and "
-        "<code>tests/test_api.py</code> was executed and passed completely with <b>65 passed tests in 0.35 seconds</b>:<br/>"
+        "<code>tests/test_api.py</code> was executed and passed completely with <b>69 passed tests in 0.31 seconds</b>:<br/>"
         "• Authoritative 7-Stage Pipeline definition & regression verification against LaTeX leaks: <b>PASSED</b><br/>"
         "• RFC 5322 Syntax validation & Local-part preserving Normalization: <b>PASSED</b><br/>"
         "• Disposable domain detection (Mailinator, Sharklasers, GuerrillaMail, etc.): <b>PASSED</b><br/>"
@@ -314,7 +309,7 @@ def create_submission_pdf(
         "• Opt-in checkbox request extraction (<code>check_smtp</code> & <code>smtp_check</code>) and server security controls: <b>PASSED</b><br/>"
         "• Server-disabled reporting vs. host port 25 block reporting and UI rendering regression: <b>PASSED</b><br/>"
         "• HTTPS Provider integrations (Abstract, Hunter, ZeroBounce, Local fallback): <b>PASSED</b><br/>"
-        "• Classification logic & clearly explaining recipient verification availability: <b>PASSED</b><br/>"
+        "• 3 Assignment deliverability classifications (Likely to be delivered, Likely to bounce, Unknown): <b>PASSED</b><br/>"
         "• Batch memoization, 100-email size boundaries, rate limiting, and API error handlers: <b>PASSED</b>"
     )
     story.append(Paragraph(test_text, body_style))

@@ -425,108 +425,153 @@ def classify_result(
     domain_error: Optional[str] = None
 ) -> Tuple[str, str, str]:
     """
-    Stage 7: Transparent, multi-factor result classification.
-    Returns:
-        (classification: str, status_category: str, explanation: str)
-    Classifications:
-        - "Valid" / "Likely to be Delivered": Valid syntax, domain exists, MX valid, not disposable, recipient verified.
-        - "Invalid" / "Likely to Bounce": Syntax invalid, NXDOMAIN, Null MX, no MX/A records, or mailbox confirmed invalid.
-        - "Risky": Disposable domain, catch-all server, role-based email, or domain valid but recipient unverified.
-        - "Unknown": DNS timeout, DNS error, provider timeout, or quota exceeded.
+    Evaluates evidence from all verification stages to classify an email address
+    into one of the three assignment-required deliverability outcomes:
+        1. "Likely to be delivered" (status_category: "valid")
+        2. "Likely to bounce" (status_category: "invalid")
+        3. "Unknown" (status_category: "unknown")
     """
     # 1. Syntax Check
     if not syntax_valid:
-        msg = f"Invalid email syntax: {syntax_error or 'malformed structure'}."
-        return "Invalid", "invalid", msg
+        msg = f"Invalid email syntax: {syntax_error or 'malformed structure'}. Likely to bounce."
+        return "Likely to bounce", "invalid", msg
 
-    # 2. Domain / DNS Checks
+    # 2. Nonexistent Domain (NXDOMAIN)
     if domain_status == "nonexistent":
-        return "Invalid", "invalid", "The domain does not exist in DNS (NXDOMAIN). Mail sent to this address will bounce."
+        return "Likely to bounce", "invalid", "The domain does not exist in DNS (NXDOMAIN). Mail sent to this address will bounce."
 
     # 3. RFC 7505 Null MX Check
     if mx_status == "null_mx":
-        return "Invalid", "invalid", "Domain publishes an RFC 7505 Null MX record ('0 .'), explicitly declaring that it does not accept email."
+        return "Likely to bounce", "invalid", "Domain publishes an RFC 7505 Null MX record ('0 .'), explicitly declaring that it does not accept email. Likely to bounce."
 
     # 4. Missing Mail Routing
     if mx_status == "no_records":
-        return "Invalid", "invalid", "Domain exists, but has no MX or A records configured to receive email."
+        return "Likely to bounce", "invalid", "Domain exists in DNS, but has no MX or A records configured to receive email. Likely to bounce."
 
-    # 5. DNS Errors / Timeouts
+    # 5. DNS Errors / Timeouts (Temporary failures, never confirmed bounces)
     if domain_status in ("dns_timeout", "dns_error") or mx_status in ("dns_timeout", "dns_error"):
-        return "Unknown", "unknown", f"DNS query could not be completed ({domain_error or 'timeout/server failure'})."
+        return "Unknown", "unknown", f"DNS query could not be completed ({domain_error or 'timeout/server failure'}). Deliverability is Unknown (temporary issue, not a confirmed bounce)."
 
-    # 6. Disposable Email Check
-    if is_disposable:
-        return "Risky", "risky", "Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). These inboxes are short-lived and risky for deliverability."
-
-    # 7. Check if genuine SMTP probe explicitly rejected the recipient
+    # 6. Confirmed Recipient Rejection via SMTP Handshake
     if smtp_info and smtp_info.get("smtp_attempted"):
         smtp_st = smtp_info.get("smtp_status")
         smtp_exp = smtp_info.get("smtp_explanation") or smtp_info.get("reason", "")
         if smtp_st in ("rejected", "mailbox_rejected"):
-            return "Invalid", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_exp}."
+            return "Likely to bounce", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_exp}. Likely to bounce."
 
-    # 8. Provider-Based Inbox Verification (HTTPS)
+    # 7. Provider-Based Inbox Verification (HTTPS)
     if provider_res:
         p_status = provider_res.get("status")
         p_reason = provider_res.get("reason", "")
         p_disposable = provider_res.get("is_disposable")
         p_catchall = provider_res.get("is_catch_all")
 
-        if p_disposable:
-            return "Risky", "risky", "Verification provider flagged domain as a temporary or disposable email address."
+        if p_status == "undeliverable":
+            return "Likely to bounce", "invalid", f"Recipient inbox confirmed invalid or undeliverable by verification provider ({p_reason}). Likely to bounce."
 
         if p_status == "deliverable":
-            return "Valid", "valid", f"Syntax valid, active MX routing verified, and recipient inbox confirmed deliverable ({p_reason})."
-
-        elif p_status == "undeliverable":
-            return "Invalid", "invalid", f"Recipient inbox confirmed invalid or undeliverable ({p_reason})."
-
-        elif p_status == "risky" or p_catchall:
-            return "Risky", "risky", f"Address flagged as risky ({p_reason})."
-
-        elif p_status == "unavailable":
-            # If provider is unconfigured (Local fallback), check if genuine SMTP probe succeeded
-            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
-                return "Valid", "valid", (
-                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). "
-                    "Note: Confirms address acceptance during SMTP transaction; downstream inbox placement is not guaranteed."
-                )
-            if smtp_info and smtp_info.get("smtp_status") in ("rejected", "mailbox_rejected"):
-                return "Invalid", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_info.get('smtp_explanation')}."
-            # Provider is unconfigured (Local engine): domain is valid, but recipient inbox is unverified
-            return "Risky", "risky", (
-                "Domain mail routing is active (MX verified). Recipient-level verification is unavailable (unverified) because no provider API key is configured. "
-                "Note: A valid domain does not guarantee individual recipient inbox existence."
+            return (
+                "Likely to be delivered",
+                "valid",
+                f"Syntax valid, active MX routing verified, and recipient inbox confirmed deliverable via provider ({p_reason}). "
+                "Likely to be delivered. (Warning: Delivery depends on destination server acceptance policies and spam filters; final delivery is not guaranteed)."
             )
 
-        elif p_status == "unknown":
-            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
-                return "Valid", "valid", (
-                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK)."
-                )
-            return "Unknown", "unknown", f"Recipient inbox verification was inconclusive ({p_reason})."
+        if p_disposable or is_disposable:
+            return (
+                "Unknown",
+                "unknown",
+                "Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). Deliverability is Unknown as disposable inboxes are short-lived or public."
+            )
 
-    # 9. Optional Direct SMTP Check (if no HTTPS provider was queried)
+        if p_catchall or p_status == "risky":
+            return (
+                "Unknown",
+                "unknown",
+                f"Domain mail server is configured as catch-all or flagged as risky ({p_reason}). Individual mailbox deliverability cannot be confirmed; outcome is Unknown."
+            )
+
+        if p_status == "unavailable":
+            # If provider is unconfigured (Local fallback), check if genuine SMTP probe succeeded
+            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
+                return (
+                    "Likely to be delivered",
+                    "valid",
+                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). "
+                    "Likely to be delivered. (Warning: Confirms recipient acceptance during SMTP session; downstream delivery is not guaranteed due to anti-spam filtering or mailbox quotas)."
+                )
+            if smtp_info and smtp_info.get("smtp_status") in ("rejected", "mailbox_rejected"):
+                return "Likely to bounce", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_info.get('smtp_explanation')}."
+
+            if is_disposable:
+                return (
+                    "Unknown",
+                    "unknown",
+                    "Domain belongs to a known temporary/disposable email service. Deliverability is Unknown."
+                )
+
+            # Provider is unconfigured (Local engine) and SMTP unavailable/disabled:
+            # Domain is valid, but recipient inbox is unverified -> outcome is Unknown!
+            return (
+                "Unknown",
+                "unknown",
+                "Domain mail routing is active (MX verified), but recipient mailbox existence could not be confirmed "
+                "(SMTP probe unavailable on this host and no HTTPS verification provider configured). Delivery outcome is Unknown."
+            )
+
+        if p_status == "unknown":
+            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
+                return (
+                    "Likely to be delivered",
+                    "valid",
+                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). Likely to be delivered."
+                )
+            return "Unknown", "unknown", f"Recipient inbox verification was inconclusive ({p_reason}). Outcome is Unknown."
+
+    # 8. Direct SMTP Check (if no HTTPS provider was queried)
     if smtp_info and smtp_info.get("smtp_attempted"):
         smtp_status = smtp_info.get("smtp_status")
         smtp_reason = smtp_info.get("smtp_explanation") or smtp_info.get("reason", "")
         is_catch_all = smtp_info.get("is_catch_all", False)
 
         if smtp_status in ("rejected", "mailbox_rejected"):
-            return "Invalid", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_reason}."
-        if smtp_status == "catch_all" or is_catch_all:
-            return "Risky", "risky", "Domain server is configured as catch-all (accepts any mailbox). Individual mailbox existence cannot be confirmed."
-        if smtp_status in ("connection_failed", "timeout", "unavailable"):
-            return "Unknown", "unknown", "Outbound direct SMTP connection was blocked or timed out (standard mail port 25 restricted on hosting platform). Mail routing is valid, but specific mailbox existence cannot be confirmed."
+            return "Likely to bounce", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_reason}. Likely to bounce."
         if smtp_status in ("accepted", "mailbox_accepted"):
-            return "Valid", "valid", "Syntax valid, MX routing verified, and mail server accepted recipient in SMTP handshake (250 OK)."
+            return (
+                "Likely to be delivered",
+                "valid",
+                "Syntax valid, MX routing verified, and mail server accepted recipient in SMTP handshake (250 OK). "
+                "Likely to be delivered. (Warning: Confirms recipient acceptance during SMTP session; downstream delivery is not guaranteed due to anti-spam filtering or mailbox quotas)."
+            )
+        if smtp_status == "catch_all" or is_catch_all:
+            return (
+                "Unknown",
+                "unknown",
+                "Domain server is configured as catch-all (accepts any mailbox indiscriminately). Individual mailbox existence cannot be confirmed; outcome is Unknown."
+            )
+        if smtp_status in ("connection_failed", "timeout", "unavailable"):
+            return (
+                "Unknown",
+                "unknown",
+                "Outbound direct SMTP connection was blocked or timed out (standard mail port 25 restricted on hosting platform). "
+                "Mail routing is valid, but specific mailbox existence cannot be confirmed. Outcome is Unknown."
+            )
+        if smtp_status == "inconclusive":
+            return "Unknown", "unknown", f"SMTP probe was inconclusive: {smtp_reason}. Outcome is Unknown."
 
-    # 10. Fallback if no provider and no SMTP attempted:
-    # Explicitly distinguish domain-level validation from recipient-level verification!
-    return "Risky", "risky", (
-        "Valid syntax and active MX routing verified. Recipient inbox verification is unverified. "
-        "Domain is prepared to receive mail, but recipient existence cannot be guaranteed without HTTPS provider verification."
+    # 9. Disposable Domain Check (if reached without provider)
+    if is_disposable:
+        return (
+            "Unknown",
+            "unknown",
+            "Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). Deliverability is Unknown as disposable inboxes are short-lived or public."
+        )
+
+    # 10. Fallback: Domain valid, but recipient inbox unverified
+    return (
+        "Unknown",
+        "unknown",
+        "Valid syntax and active MX routing verified. Recipient inbox verification could not be confirmed without SMTP or provider verification. Outcome is Unknown."
     )
 
 
@@ -581,6 +626,7 @@ def verify_single_email(
             "smtp_probe": default_smtp,
             "smtp_status": default_smtp["smtp_status"],
             "classification": classification,
+            "outcome": classification,
             "status_category": status_cat,
             "reason": reason,
             "duration_ms": duration_ms,
@@ -739,6 +785,7 @@ def verify_single_email(
         "smtp_probe": smtp_probe_res,
         "smtp_status": smtp_probe_res.get("smtp_status", "disabled"),
         "classification": classification,
+        "outcome": classification,
         "status_category": status_cat,
         "reason": reason,
         "duration_ms": duration_ms,
@@ -805,14 +852,13 @@ def verify_email_list(
         results.append(res)
 
         cat = res.get("status_category", "unknown").lower()
-        if cat == "valid":
+        cls = res.get("classification", "").lower()
+        if cat in ("valid", "likely_to_deliver") or "deliver" in cls:
             summary["valid"] += 1
             summary["likely_to_deliver"] += 1
-        elif cat == "invalid":
+        elif cat in ("invalid", "likely_to_bounce") or "bounce" in cls:
             summary["invalid"] += 1
             summary["likely_to_bounce"] += 1
-        elif cat == "risky":
-            summary["risky"] += 1
         else:
             summary["unknown"] += 1
 

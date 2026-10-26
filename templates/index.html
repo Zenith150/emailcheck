@@ -233,7 +233,7 @@
         </section>
 
         <!-- Summary Statistics Section -->
-        <section id="summarySection" class="summary-grid summary-grid-5" style="display: none;" aria-label="Verification Summary">
+        <section id="summarySection" class="summary-grid summary-grid-4" style="display: none;" aria-label="Verification Summary">
           <div class="summary-card card-total">
             <div class="card-icon total-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -257,7 +257,7 @@
               </svg>
             </div>
             <div class="summary-meta">
-              <span class="summary-label">Valid</span>
+              <span class="summary-label">Likely to be Delivered</span>
               <span id="summaryDelivered" class="summary-value text-green">0</span>
               <span id="pctDelivered" class="summary-subtext">0% of total</span>
             </div>
@@ -271,24 +271,9 @@
               </svg>
             </div>
             <div class="summary-meta">
-              <span class="summary-label">Invalid</span>
+              <span class="summary-label">Likely to Bounce</span>
               <span id="summaryBounce" class="summary-value text-red">0</span>
               <span id="pctBounce" class="summary-subtext">0% of total</span>
-            </div>
-          </div>
-
-          <div class="summary-card card-risky">
-            <div class="card-icon risky-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-            </div>
-            <div class="summary-meta">
-              <span class="summary-label" title="Catch-all servers, disposable domains, or unverified recipient inboxes">Risky</span>
-              <span id="summaryRisky" class="summary-value text-amber">0</span>
-              <span id="pctRisky" class="summary-subtext">0% of total</span>
             </div>
           </div>
 
@@ -301,9 +286,11 @@
               </svg>
             </div>
             <div class="summary-meta">
-              <span class="summary-label" title="DNS timeouts, nameserver errors, or provider rate limits">Unknown</span>
+              <span class="summary-label" title="Unverified inboxes, DNS timeouts, catch-all, or temporary domains">Unknown</span>
               <span id="summaryUnknown" class="summary-value text-slate">0</span>
               <span id="pctUnknown" class="summary-subtext">0% of total</span>
+              <span id="summaryRisky" style="display: none;">0</span>
+              <span id="pctRisky" style="display: none;">0%</span>
             </div>
           </div>
         </section>
@@ -316,18 +303,16 @@
                 <button type="button" class="tab-btn active" data-filter="all" role="tab" aria-selected="true">
                   All <span id="tabCountAll" class="tab-counter">0</span>
                 </button>
-                <button type="button" class="tab-btn filter-delivered" data-filter="Valid" role="tab" aria-selected="false">
-                  Valid <span id="tabCountDelivered" class="tab-counter">0</span>
+                <button type="button" class="tab-btn filter-delivered" data-filter="Likely to be delivered" role="tab" aria-selected="false">
+                  Likely to Deliver <span id="tabCountDelivered" class="tab-counter">0</span>
                 </button>
-                <button type="button" class="tab-btn filter-bounce" data-filter="Invalid" role="tab" aria-selected="false">
-                  Invalid <span id="tabCountBounce" class="tab-counter">0</span>
-                </button>
-                <button type="button" class="tab-btn filter-risky" data-filter="Risky" role="tab" aria-selected="false">
-                  Risky <span id="tabCountRisky" class="tab-counter">0</span>
+                <button type="button" class="tab-btn filter-bounce" data-filter="Likely to bounce" role="tab" aria-selected="false">
+                  Likely to Bounce <span id="tabCountBounce" class="tab-counter">0</span>
                 </button>
                 <button type="button" class="tab-btn filter-unknown" data-filter="Unknown" role="tab" aria-selected="false">
                   Unknown <span id="tabCountUnknown" class="tab-counter">0</span>
                 </button>
+                <span id="tabCountRisky" style="display: none;">0</span>
               </div>
 
               <div class="search-box">
