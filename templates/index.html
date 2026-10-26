@@ -3,14 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EmailCheck — Multi-Stage Email Verification & Deliverability Diagnostics</title>
-  <meta name="description" content="Production-ready email verification over HTTPS (port 443). Classify email deliverability with RFC syntax, DNS resolution, MX records, disposable domain filtering, and provider-based inbox verification.">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <title>EmailCheck — Evidence-Based Bulk Email Deliverability Verification</title>
+  <meta name="description" content="Evidence-based bulk email verification SaaS checking syntax RFC rules, DNS MX mail routing, disposable domains, and optional SMTP diagnostics.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='20' height='16' x='2' y='4' rx='2'/><path d='m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body>
+<body class="theme-light">
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
@@ -19,21 +20,51 @@
     <div class="header-container">
       <div class="brand">
         <div class="brand-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5C2 7 4 5 6.5 5H17.5C20 5 22 7 22 9.5V17z"/>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="20" height="16" x="2" y="4" rx="2"/>
             <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
-            <path d="m9 13 2 2 4-4"/>
           </svg>
         </div>
         <div class="brand-text">
-          <h1>EmailCheck</h1>
-          <span class="badge-tag">HTTPS Verification Engine</span>
+          <div class="brand-title-row">
+            <h1>EmailCheck</h1>
+            <span class="pro-tag">PRO SaaS</span>
+          </div>
+          <span class="brand-subtitle">Evidence-based bulk email deliverability verification</span>
         </div>
       </div>
+
       <div class="header-actions">
+        <!-- Live API Status Pill -->
+        <a href="/health" target="_blank" class="api-status-badge" title="Backend service status (GET /health)">
+          <span class="pulse-dot"></span>
+          <span class="status-text">API: <strong id="apiStatusText">Online</strong></span>
+        </a>
+
+        <!-- Dark/Light Theme Toggle -->
+        <button type="button" id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle dark/light theme" title="Toggle dark/light theme">
+          <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+
         <a href="#about" class="nav-link">Methodology</a>
-        <a href="/health" target="_blank" class="nav-link status-pill">
-          <span class="status-dot"></span> System Status
+        <a href="https://github.com/Zenith150/emailcheck" target="_blank" rel="noopener" class="nav-link github-nav-link">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          <span>GitHub</span>
         </a>
       </div>
     </div>
@@ -43,7 +74,48 @@
   <main class="main-content">
     <div class="content-wrapper">
 
-      <!-- Disclaimer & Overview Notice Banner -->
+      <!-- Hero Section: Evidence-Based Deliverability Engine (Inspired by MailCheck) -->
+      <section class="hero-section" aria-label="Evidence-Based Deliverability Engine">
+        <div class="hero-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <span>Evidence-Based Deliverability Engine</span>
+        </div>
+        <h2 class="hero-title">Probability Estimates, Not Delivery Guarantees</h2>
+        <p class="hero-description">
+          Validate format compliance against RFC specifications, probe live DNS Mail Exchange (MX) and fallback A/AAAA records, and identify delivery risks before launching campaigns.
+        </p>
+
+        <!-- The 3 Outcome Definition Cards -->
+        <div class="outcome-definition-grid">
+          <div class="def-card def-card-deliver">
+            <div class="def-card-header">
+              <span class="def-dot dot-emerald"></span>
+              <h4>Likely to be delivered</h4>
+            </div>
+            <p>Syntax passes RFC rules and verified mail-routing MX servers accept traffic. Note: Recipient delivery is subject to mailbox quota and spam filtering.</p>
+          </div>
+
+          <div class="def-card def-card-bounce">
+            <div class="def-card-header">
+              <span class="def-dot dot-rose"></span>
+              <h4>Likely to bounce</h4>
+            </div>
+            <p>Invalid syntax, nonexistent domain (NXDOMAIN), RFC 7505 Null MX record, or confirmed absence of mail routes. Mail will be permanently rejected.</p>
+          </div>
+
+          <div class="def-card def-card-unknown">
+            <div class="def-card-header">
+              <span class="def-dot dot-amber"></span>
+              <h4>Unknown</h4>
+            </div>
+            <p>Domain MX routing is active, but individual mailbox existence could not be confirmed without outbound SMTP (port 25 blocked) or an HTTPS provider.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Non-Invasive Verification Pipeline Notice Banner (Regression preserved) -->
       <section class="notice-banner" aria-label="Verification Disclaimer">
         <div class="notice-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -92,11 +164,10 @@
       <nav class="main-tabs" role="tablist" aria-label="Tool Navigation">
         <button type="button" class="main-tab-btn active" id="tabVerifyEmails" role="tab" aria-selected="true" aria-controls="sectionVerifyEmails">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5C2 7 4 5 6.5 5H17.5C20 5 22 7 22 9.5V17z"/>
+            <rect width="20" height="16" x="2" y="4" rx="2"/>
             <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
-            <path d="m9 13 2 2 4-4"/>
           </svg>
-          <span>Batch Verification</span>
+          <span>Batch Verifier</span>
         </button>
         <button type="button" class="main-tab-btn" id="tabDomainDiag" role="tab" aria-selected="false" aria-controls="sectionDomainDiag">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -111,7 +182,7 @@
             <circle cx="12" cy="12" r="10"/>
             <polyline points="12 6 12 12 16 14"/>
           </svg>
-          <span>Verification History</span>
+          <span>History</span>
           <span id="historyBadge" class="history-count-pill" style="display: none;">0</span>
         </button>
       </nav>
@@ -123,8 +194,8 @@
         <section class="card input-card">
           <div class="card-header">
             <div class="card-title-group">
-              <h2 class="card-title">Verify Email Addresses</h2>
-              <p class="card-subtitle">Paste multiple email addresses separated by newlines, commas, semicolons, or spaces (up to {{ max_emails }} addresses per batch).</p>
+              <h2 class="card-title">Email Addresses to Verify</h2>
+              <p class="card-subtitle">Paste multiple email addresses (one per line, up to {{ max_emails }} addresses per batch). Delimiters like commas and spaces are also supported.</p>
             </div>
             <div class="input-stats">
               <span id="lineCountBadge" class="counter-badge">0 / {{ max_emails }} addresses</span>
@@ -137,7 +208,7 @@
                 id="emailsInput"
                 name="emails"
                 rows="7"
-                placeholder="alex.smith@example.com&#10;sarah.johnson@company.org&#10;test.user@mailinator.com&#10;service@nonexistent-domain.invalid"
+                placeholder="user+newsletter@subdomain.example.org&#10;contact@google.com&#10;support@github.com&#10;test.user@mailinator.com&#10;bad-email-without-domain@&#10;service@nonexistent-fake-domain-xyz98741.invalid"
                 aria-label="Email list to verify"
                 spellcheck="false"
                 autocomplete="off"
@@ -163,6 +234,7 @@
                 <span>HTTPS Recipient Engine (Port 443)</span>
               </div>
 
+              <!-- SMTP Probe Toggle (Preserving exact attributes required by regression tests) -->
               <div class="smtp-toggle-wrapper">
                 <label class="smtp-toggle-label" title="Attempt a direct SMTP EHLO/MAIL FROM/RCPT TO handshake on compatible hosts (port 25). Probing is opt-in and respects server security controls.">
                   <input type="checkbox" id="smtpProbeToggle" name="smtp_check">
@@ -175,28 +247,31 @@
                 {% endif %}
               </div>
 
-              <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                  <polyline points="10 9 9 9 8 9"/>
-                </svg>
-                Load Diverse Sample List
-              </button>
+              <div class="quick-action-btns">
+                <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                  </svg>
+                  Load Sample Data
+                </button>
+              </div>
             </div>
 
+            <!-- SMTP Status Note & Render Limitation Notice -->
             <div class="smtp-status-note" id="smtpStatusNote">
               {% if smtp_probe_enabled %}
                 <span class="note-text info">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                  SMTP probing is permitted by server configuration. On Render, outbound port 25 connections are filtered by the host firewall and will safely report <strong>Unavailable</strong> with HTTPS fallback.
+                  <strong>Cloud Port 25 Notice:</strong> Disabled by default (recommended): fast Syntax &amp; DNS MX verification without port 25 timeouts. On Render, outbound port 25 is restricted by the cloud firewall and will safely report <strong>Unavailable</strong> with transparent evidence.
                 </span>
               {% else %}
                 <span class="note-text warning">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                  Server environment has SMTP probing disabled (<code>ENABLE_SMTP_PROBE=false</code>). Probing requests will report <strong>Disabled</strong> unless <code>ENABLE_SMTP_PROBE=true</code> is configured in the Render Dashboard.
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  <strong>Cloud Port 25 Notice:</strong> Disabled by default (recommended): fast Syntax &amp; DNS MX verification without port 25 timeouts. Server configuration currently has SMTP probing disabled (<code>ENABLE_SMTP_PROBE=false</code>).
                 </span>
               {% endif %}
             </div>
@@ -220,10 +295,10 @@
             </div>
           </form>
 
-          <!-- Progress Bar Indicator -->
+          <!-- Animated Multi-Stage Progress Bar -->
           <div id="progressContainer" class="progress-bar-container" style="display: none;">
             <div class="progress-info">
-              <span id="progressText">Executing 7-stage verification pipeline...</span>
+              <span id="progressText">Processing verification pipeline...</span>
               <span class="progress-pulsar"></span>
             </div>
             <div class="progress-bar">
@@ -244,7 +319,7 @@
               </svg>
             </div>
             <div class="summary-meta">
-              <span class="summary-label">Total Checked</span>
+              <span class="summary-label">Total Emails</span>
               <span id="summaryTotal" class="summary-value">0</span>
               <span id="summaryUniqueMeta" class="summary-subtext">0 unique</span>
             </div>
@@ -320,7 +395,7 @@
                   <circle cx="11" cy="11" r="8"/>
                   <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
-                <input type="text" id="searchInput" placeholder="Search emails or domains..." aria-label="Filter results table">
+                <input type="text" id="searchInput" placeholder="Search by address or reason..." aria-label="Filter results table">
               </div>
 
               <div class="sort-box">
@@ -342,7 +417,7 @@
                   <polyline points="7 10 12 15 17 10"/>
                   <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
-                Download CSV
+                Export CSV
               </button>
             </div>
           </div>
@@ -353,15 +428,14 @@
               <thead>
                 <tr>
                   <th scope="col" style="width: 45px;">#</th>
+                  <th scope="col" style="width: 140px;">Status</th>
                   <th scope="col">Email Address</th>
                   <th scope="col" style="width: 95px;" title="RFC 5322 syntax validation">Syntax</th>
                   <th scope="col" style="width: 130px;" title="DNS resolution and Mail Exchanger (MX) routing">Domain / MX</th>
                   <th scope="col" style="width: 100px;" title="Disposable or temporary inbox detection">Disposable</th>
-                  <th scope="col" style="width: 115px;" title="Genuine SMTP recipient probe (EHLO/MAIL FROM/RCPT TO)">SMTP Probe</th>
-                  <th scope="col" style="width: 125px;" title="HTTPS provider recipient-level inbox verification">Recipient Check</th>
-                  <th scope="col" style="width: 125px;">Classification</th>
-                  <th scope="col">Explanation &amp; Diagnostics</th>
-                  <th scope="col" style="width: 80px; text-align: center;">Details</th>
+                  <th scope="col" style="width: 120px;" title="Genuine SMTP recipient probe (EHLO/MAIL FROM/RCPT TO)">SMTP Probe</th>
+                  <th scope="col">Analysis / Evidence</th>
+                  <th scope="col" style="width: 95px; text-align: center;">Actions</th>
                 </tr>
               </thead>
               <tbody id="resultsTableBody">
@@ -392,22 +466,23 @@
           </div>
 
           <div id="noMatchMessage" class="no-matches" style="display: none;">
-            <p>No results match your active search or filter.</p>
+            <p>No matching records found.</p>
+            <small class="text-muted">Try adjusting your search terms or filter selection.</small>
           </div>
         </section>
 
         <!-- Empty State -->
         <section id="emptyState" class="empty-state">
           <div class="empty-illustration">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-              <polyline points="22,6 12,13 2,6"/>
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="20" height="16" x="2" y="4" rx="2"/>
+              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
               <circle cx="18" cy="18" r="3"/>
               <path d="m17 18 1 1 2-2"/>
             </svg>
           </div>
           <h3>No Emails Verified Yet</h3>
-          <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to inspect syntax, disposable domains, DNS mail routing, and HTTPS recipient inbox deliverability.</p>
+          <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to inspect syntax, disposable domains, DNS mail routing, and recipient deliverability.</p>
         </section>
 
       </div>
@@ -470,8 +545,8 @@
         <section class="card history-card">
           <div class="card-header">
             <div class="card-title-group">
-              <h2 class="card-title">Recent Verification Sessions</h2>
-              <p class="card-subtitle">Previous sessions stored locally in your browser. Reopen past results or export them to CSV at any time.</p>
+              <h2 class="card-title">Previous Verification Batches</h2>
+              <p class="card-subtitle">Verification batches are saved in local browser storage for auditing. Reopen past results or export them to CSV at any time.</p>
             </div>
             <div class="history-actions">
               <button type="button" id="clearHistoryBtn" class="btn btn-outline btn-sm">
@@ -479,7 +554,7 @@
                   <polyline points="3 6 5 6 21 6"/>
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                 </svg>
-                Clear History
+                Clear All History
               </button>
             </div>
           </div>
@@ -495,8 +570,8 @@
                 <polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
-            <p>No verification history stored in this browser yet.</p>
-            <small class="text-muted">Verification sessions are saved automatically to your device's browser storage.</small>
+            <p>No verification history recorded yet.</p>
+            <small class="text-muted">Run your first batch in the Verifier tab to see your local history and audit records here.</small>
           </div>
 
           <div class="history-privacy-notice">
@@ -526,26 +601,20 @@
         <h3 class="classification-heading">Classification Categories</h3>
         <div class="info-grid">
           <div class="info-card">
-            <div class="info-badge badge-green">Valid</div>
-            <p>Email has valid RFC syntax, resolves to an active domain with usable MX records, is not a disposable provider, and recipient inbox was confirmed deliverable by verification provider.</p>
+            <div class="info-badge badge-green">Likely to be delivered</div>
+            <p>Email has valid RFC syntax, resolves to an active domain with usable MX records, is not a disposable provider, and recipient inbox was confirmed deliverable by verification provider or SMTP 250 acceptance.</p>
             <small class="text-muted">High deliverability confidence. Inbox delivery subject to recipient mailbox quotas and spam filters.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-red">Invalid</div>
+            <div class="info-badge badge-red">Likely to bounce</div>
             <p>Malformed syntax, domain confirmed nonexistent (NXDOMAIN), domain publishes an RFC 7505 Null MX record, has no mail routing, or recipient was confirmed undeliverable.</p>
             <small class="text-muted">Emails sent to this address will almost certainly bounce or be rejected.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-amber">Risky</div>
-            <p>Domain is a temporary/disposable service, mail server is configured as catch-all (accepts any user), address is a generic role, or domain exists but recipient inbox is unverified.</p>
-            <small class="text-muted">Distinguishes domain routing from recipient inbox confirmation.</small>
-          </div>
-
-          <div class="info-card">
             <div class="info-badge badge-slate">Unknown</div>
-            <p>DNS query timed out, nameserver failed, or provider API experienced rate limiting, quota exhaustion, or temporary timeout.</p>
+            <p>Domain mail routing is active, but individual mailbox existence could not be confirmed without outbound SMTP (port 25 blocked) or an HTTPS provider. Also assigned to catch-all servers, disposable domains, and DNS timeouts.</p>
             <small class="text-muted">Transparent fallback: never guesses deliverability when diagnostics are inconclusive.</small>
           </div>
         </div>
@@ -559,14 +628,46 @@
     </div>
   </main>
 
+  <!-- Inspection Modal (Inspired by MailCheck "Inspect" Dialog) -->
+  <div id="inspectModal" class="modal-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modalEmailTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-tag">Verification Diagnostics</span>
+          <h3 id="modalEmailTitle" class="modal-email-title">user@example.com</h3>
+        </div>
+        <button type="button" id="closeInspectModalBtn" class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body" id="inspectModalBody">
+        <!-- Dynamically populated by app.js -->
+      </div>
+
+      <div class="modal-footer">
+        <span class="modal-status-badge" id="modalStatusBadge"></span>
+        <button type="button" id="modalDismissBtn" class="btn btn-secondary btn-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Footer -->
   <footer class="app-footer">
     <div class="footer-container">
-      <p>&copy; 2026 EmailCheck — Built with Flask, dnspython, and HTTPS Verification Engine.</p>
+      <div class="footer-brand-row">
+        <strong>EmailCheck</strong> — Evidence-Based Bulk Email Deliverability Verification
+      </div>
+      <p class="footer-disclaimer">
+        RFC 5321 • RFC 5322 • RFC 7505 Compliant. Zero Outbound Email Transmission. In-memory batch processing.
+      </p>
       <div class="footer-links">
         <a href="/health" target="_blank">API Health</a>
         <span class="sep">•</span>
-        <a href="https://github.com/Zenith150/emailcheck" target="_blank">GitHub Repository</a>
+        <a href="https://github.com/Zenith150/emailcheck" target="_blank" rel="noopener">GitHub Repository</a>
         <span class="sep">•</span>
         <a href="#about">Methodology</a>
       </div>

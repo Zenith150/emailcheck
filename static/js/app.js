@@ -1,17 +1,27 @@
 /**
- * EmailCheck - Frontend Application Logic (v2.1)
+ * EmailCheck - Frontend Application Logic (v2.3)
+ * Inspired by MailCheck SaaS Architecture & Aesthetics
+ *
  * Features:
+ * - Theme Switcher (Dark / Light Mode) with system preference detection & localStorage
+ * - Live API Health Indicator
+ * - Multi-stage animated pipeline progress bar
  * - Intelligent multi-delimiter email parsing (newlines, commas, semicolons, spaces)
  * - Real-time duplicate detection & memoization feedback
- * - Division-by-zero safe percentage calculations
+ * - Division-by-zero safe summary metrics (Total, Likely to Deliver, Likely to Bounce, Unknown)
  * - Debounced search, multi-factor sorting & pagination
- * - Collapsible per-email diagnostics panel (syntax, MX, Null MX, disposable, provider, duration)
+ * - Inspection Modal with multi-stage diagnostics and raw JSON payload viewer
+ * - Collapsible per-email diagnostics panel for inline audit
  * - Dedicated Domain Diagnostics inspection tool
  * - Lightweight client-side session history in localStorage
- * - RFC 4180 compliant CSV export
+ * - RFC 4180 compliant CSV export retaining complete diagnostic explanation
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Theme Toggle Elements
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+  const THEME_KEY = 'emailcheck_theme';
+
   // Navigation Tabs
   const tabVerifyEmails = document.getElementById('tabVerifyEmails');
   const tabDomainDiag = document.getElementById('tabDomainDiag');
@@ -32,7 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnIcon = document.getElementById('btnIcon');
   const btnText = document.getElementById('btnText');
   const progressContainer = document.getElementById('progressContainer');
+  const progressText = document.getElementById('progressText');
   const toastContainer = document.getElementById('toastContainer');
+  const apiStatusText = document.getElementById('apiStatusText');
 
   const emptyState = document.getElementById('emptyState');
   const summarySection = document.getElementById('summarySection');
@@ -73,6 +85,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const nextPageBtn = document.getElementById('nextPageBtn');
   const pageIndicator = document.getElementById('pageIndicator');
 
+  // Inspection Modal Elements
+  const inspectModal = document.getElementById('inspectModal');
+  const modalEmailTitle = document.getElementById('modalEmailTitle');
+  const inspectModalBody = document.getElementById('inspectModalBody');
+  const modalStatusBadge = document.getElementById('modalStatusBadge');
+  const closeInspectModalBtn = document.getElementById('closeInspectModalBtn');
+  const modalDismissBtn = document.getElementById('modalDismissBtn');
+
   // Domain Diagnostics Elements
   const domainForm = document.getElementById('domainForm');
   const domainInput = document.getElementById('domainInput');
@@ -99,9 +119,44 @@ document.addEventListener('DOMContentLoaded', () => {
   const MAX_EMAILS = 100;
   const HISTORY_KEY = 'emailcheck_history_v1';
   let searchDebounceTimer = null;
+  let progressAnimationInterval = null;
 
   // ==========================================================================
-  // Helper: Escape HTML to prevent XSS and artifact leaks
+  // Theme Switcher (Dark / Light Mode)
+  // ==========================================================================
+  function initTheme() {
+    const savedTheme = localStorage.getItem(THEME_KEY);
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+    applyTheme(initialTheme);
+  }
+
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.body.classList.remove('theme-light');
+      document.body.classList.add('theme-dark');
+      document.documentElement.classList.add('dark');
+      localStorage.setItem(THEME_KEY, 'dark');
+    } else {
+      document.body.classList.remove('theme-dark');
+      document.body.classList.add('theme-light');
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem(THEME_KEY, 'light');
+    }
+  }
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+      const isDark = document.body.classList.contains('theme-dark');
+      applyTheme(isDark ? 'light' : 'dark');
+      showToast(`Switched to ${isDark ? 'light' : 'dark'} mode.`, 'info');
+    });
+  }
+
+  initTheme();
+
+  // ==========================================================================
+  // Helper: Escape HTML to prevent XSS
   // ==========================================================================
   function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -114,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Toast Notification Utility
   // ==========================================================================
   function showToast(message, type = 'info') {
+    if (!toastContainer) return;
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     toast.setAttribute('role', 'alert');
@@ -136,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================================================
-  // Parser: Multi-Delimiter Input Parser with Duplicate Counting
+  // Multi-Delimiter Input Parser with Duplicate Counting
   // ==========================================================================
   function parseEmailInput(rawText) {
     if (!rawText || typeof rawText !== 'string') return [];
@@ -161,8 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
     lineCountBadge.textContent = `${count} / ${MAX_EMAILS} addresses`;
 
     if (count > MAX_EMAILS) {
-      lineCountBadge.style.color = 'var(--color-red-accent)';
-      lineCountBadge.style.borderColor = 'var(--color-red-border)';
+      lineCountBadge.style.color = 'var(--bounce-accent)';
+      lineCountBadge.style.borderColor = 'var(--bounce-border)';
     } else {
       lineCountBadge.style.color = '';
       lineCountBadge.style.borderColor = '';
@@ -192,21 +248,21 @@ document.addEventListener('DOMContentLoaded', () => {
   emailsInput.addEventListener('input', updateInputCounter);
 
   // ==========================================================================
-  // Sample Email Loader
+  // Sample Email Loader (MailCheck-Inspired Diverse Test Cases)
   // ==========================================================================
   loadSampleBtn.addEventListener('click', () => {
     const samples = [
-      'support@github.com',
+      'user+newsletter@subdomain.example.org',
       'contact@google.com',
+      'support@github.com',
       'test.user@mailinator.com',
-      'service@nonexistent-fake-domain-xyz98741.invalid',
-      'malformed..syntax@@domain',
-      'alex@example.com',
+      'bad-email-without-domain@',
+      'contact@this-domain-does-not-exist-987654321.xyz',
       'support@github.com' // Duplicate to demonstrate memoization
     ];
     emailsInput.value = samples.join('\n');
     updateInputCounter();
-    showToast('Loaded diverse sample email list for testing.', 'info');
+    showToast('Loaded diverse sample addresses for verification.', 'info');
   });
 
   // ==========================================================================
@@ -234,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
     summarySection.style.display = 'none';
     resultsSection.style.display = 'none';
     resultsTableBody.innerHTML = '';
-    showToast('Form and results cleared.', 'info');
+    showToast('Verification input and results cleared.', 'info');
   });
 
   // ==========================================================================
@@ -288,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderResults();
       saveToHistory(data);
 
-      showToast(`Successfully verified ${data.total} addresses via ${data.provider || 'pipeline'}.`, 'success');
+      showToast(`Successfully verified ${data.total} addresses via ${data.provider || 'local engine'}.`, 'success');
       summarySection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     } catch (err) {
@@ -310,7 +366,24 @@ document.addEventListener('DOMContentLoaded', () => {
       btnIcon.style.display = 'none';
       btnText.textContent = 'Verifying...';
       progressContainer.style.display = 'block';
+
+      // Cycle animated progress stages
+      const stages = [
+        'Stage 1/3: Validating syntax via RFC specs...',
+        'Stage 2/3: Querying DNS MX & routing records...',
+        'Stage 3/3: Evaluating mailbox existence & classifications...'
+      ];
+      let currentStageIdx = 0;
+      progressText.textContent = stages[0];
+
+      clearInterval(progressAnimationInterval);
+      progressAnimationInterval = setInterval(() => {
+        currentStageIdx = (currentStageIdx + 1) % stages.length;
+        progressText.textContent = stages[currentStageIdx];
+      }, 700);
+
     } else {
+      clearInterval(progressAnimationInterval);
       btnSpinner.style.display = 'none';
       btnIcon.style.display = 'inline-block';
       btnText.textContent = 'Verify Emails';
@@ -319,7 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================================================
-  // Render Summary Cards (Division-by-zero protected)
+  // Render Summary Cards (Division-by-Zero Protected)
   // ==========================================================================
   function renderSummary(summary, results = []) {
     if (!summary) return;
@@ -410,7 +483,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================================================
-  // Render Results Table & Collapsible Diagnostics Panels
+  // Render Results Table & Diagnostics
   // ==========================================================================
   function renderResults() {
     resultsTableBody.innerHTML = '';
@@ -451,9 +524,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const globalIndex = startIndex + pageIdx;
       const isExpanded = expandedRowIndexes.has(item.email);
 
-      // Classification Badge
+      // Classification Badge & Icon
       let badgeClass = 'badge-unknown';
-      let badgeIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+      let badgeIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
 
       const cls = (item.classification || '').toLowerCase();
       const cat = (item.status_category || '').toLowerCase();
@@ -471,25 +544,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Syntax Pill
       const syntaxPill = item.syntax_valid
-        ? `<span class="indicator-pill pill-pass">✓ Valid</span>`
-        : `<span class="indicator-pill pill-fail">✗ Malformed</span>`;
+        ? `<span class="indicator-pill pill-pass" title="RFC format validated">PASS (RFC Valid)</span>`
+        : `<span class="indicator-pill pill-fail" title="RFC syntax malformed">FAIL (Invalid)</span>`;
 
       // Domain/MX Pill
       let mxPill = `<span class="indicator-pill pill-untested">—</span>`;
       if (item.domain_status === 'nonexistent') {
-        mxPill = `<span class="indicator-pill pill-fail" title="Domain does not exist in DNS (NXDOMAIN)">NXDOMAIN</span>`;
+        mxPill = `<span class="indicator-pill pill-fail" title="Domain does not exist in DNS (NXDOMAIN)">FAIL (NXDOMAIN)</span>`;
       } else if (item.is_null_mx || item.mx_status === 'null_mx') {
         mxPill = `<span class="indicator-pill pill-fail" title="RFC 7505 Null MX: Explicitly rejects email">Null MX (0 .)</span>`;
       } else if (item.mx_status === 'mx_found') {
-        mxPill = `<span class="indicator-pill pill-pass" title="${escapeHtml(item.mx_records ? item.mx_records.join(', ') : '')}">MX Found</span>`;
+        const mxPrimary = item.primary_mx || (item.mx_records && item.mx_records[0] ? item.mx_records[0].split(' ')[0] : 'MX Active');
+        mxPill = `<span class="indicator-pill pill-pass" title="${escapeHtml(item.mx_records ? item.mx_records.join(', ') : '')}">PASS (${escapeHtml(mxPrimary)})</span>`;
       } else if (item.mx_status === 'implicit_mx_found') {
         mxPill = `<span class="indicator-pill pill-pass" title="Implicit MX via A/AAAA record">Implicit MX</span>`;
       } else if (item.mx_status === 'no_records') {
-        mxPill = `<span class="indicator-pill pill-fail" title="No MX or A records found">No Routing</span>`;
+        mxPill = `<span class="indicator-pill pill-fail" title="No MX or A records found">FAIL (No Route)</span>`;
       } else if (item.mx_status === 'dns_timeout' || item.domain_status === 'dns_timeout') {
-        mxPill = `<span class="indicator-pill pill-untested">DNS Timeout</span>`;
-      } else if (item.domain_status === 'untested') {
-        mxPill = `<span class="indicator-pill pill-untested">Untested</span>`;
+        mxPill = `<span class="indicator-pill pill-untested" title="DNS lookup timed out">UNKNOWN (Timeout)</span>`;
       }
 
       // Disposable Pill
@@ -500,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         disposablePill = `<span class="indicator-pill pill-untested">—</span>`;
       }
 
-      // SMTP Probe Pill (Genuine SMTP Protocol Handshake)
+      // SMTP Probe Pill
       let smtpPill = `<span class="indicator-pill pill-disabled">— Disabled</span>`;
       const smtpProbe = item.smtp_probe || {};
       const smtpSt = (smtpProbe.smtp_status || item.smtp_status || 'disabled').toLowerCase();
@@ -519,23 +591,6 @@ document.addEventListener('DOMContentLoaded', () => {
         smtpPill = `<span class="indicator-pill pill-disabled" title="${escapeHtml(smtpExp)}">— Disabled</span>`;
       } else if (smtpSt === 'skipped') {
         smtpPill = `<span class="indicator-pill pill-disabled" title="${escapeHtml(smtpExp)}">— Skipped</span>`;
-      }
-
-      // Recipient / Provider Check Pill
-      let recipientPill = `<span class="indicator-pill pill-untested">Unverified</span>`;
-      const rec = (item.recipient_status || '').toLowerCase();
-      if (rec === 'deliverable') {
-        recipientPill = `<span class="indicator-pill pill-pass">✓ Deliverable</span>`;
-      } else if (rec === 'undeliverable') {
-        recipientPill = `<span class="indicator-pill pill-fail">✗ Undeliverable</span>`;
-      } else if (rec === 'risky') {
-        recipientPill = `<span class="indicator-pill pill-warning">⚠ Risky</span>`;
-      } else if (rec === 'unknown') {
-        recipientPill = `<span class="indicator-pill pill-untested">Inconclusive</span>`;
-      } else if (rec === 'unavailable') {
-        recipientPill = `<span class="indicator-pill pill-untested" title="No HTTPS verification provider API key configured. Recipient-level verification is unavailable.">Unavailable</span>`;
-      } else if (rec === 'untested') {
-        recipientPill = `<span class="indicator-pill pill-untested">Skipped</span>`;
       }
 
       // Shortened explanation for the main table per requirements
@@ -570,32 +625,34 @@ document.addEventListener('DOMContentLoaded', () => {
       row.className = `result-row ${isExpanded ? 'row-expanded' : ''}`;
       row.innerHTML = `
         <td style="color: var(--text-muted); font-size: 0.75rem;">${globalIndex + 1}</td>
-        <td class="email-cell"><strong>${escapeHtml(item.email)}</strong></td>
-        <td>${syntaxPill}</td>
-        <td>${mxPill}</td>
-        <td>${disposablePill}</td>
-        <td>${smtpPill}</td>
-        <td>${recipientPill}</td>
         <td>
           <span class="status-badge ${badgeClass}" ${unknownTooltip ? `title="${escapeHtml(unknownTooltip)}"` : ''}>
             ${badgeIcon}
             ${escapeHtml(item.classification)}
           </span>
         </td>
+        <td class="email-cell"><strong>${escapeHtml(item.email)}</strong></td>
+        <td>${syntaxPill}</td>
+        <td>${mxPill}</td>
+        <td>${disposablePill}</td>
+        <td>${smtpPill}</td>
         <td class="reason-cell" ${unknownTooltip ? `title="${escapeHtml(unknownTooltip)}"` : ''}>
           ${escapeHtml(displayReason)}
           ${unknownTooltip ? `<span class="tooltip-unknown-icon" title="${escapeHtml(unknownTooltip)}" style="cursor:help; margin-left:0.35rem; color:var(--text-muted); font-size:0.8rem;" aria-label="${escapeHtml(unknownTooltip)}">ⓘ</span>` : ''}
         </td>
-        <td style="text-align: center;">
-          <button type="button" class="btn-details-toggle" data-email="${escapeHtml(item.email)}" aria-expanded="${isExpanded}">
-            ${isExpanded ? '▲ Hide' : '▼ Details'}
+        <td style="text-align: center; white-space: nowrap;">
+          <button type="button" class="btn-inspect" data-index="${globalIndex}" title="Inspect full multi-stage diagnostics and raw JSON payload">
+            Inspect
+          </button>
+          <button type="button" class="btn-details-toggle" data-email="${escapeHtml(item.email)}" aria-expanded="${isExpanded}" title="Toggle inline diagnostics panel">
+            ${isExpanded ? '▲' : '▼'}
           </button>
         </td>
       `;
 
       resultsTableBody.appendChild(row);
 
-      // Collapsible Diagnostics Row
+      // Collapsible Inline Diagnostics Row
       if (isExpanded) {
         const detailsRow = document.createElement('tr');
         detailsRow.className = 'details-row';
@@ -605,15 +662,15 @@ document.addEventListener('DOMContentLoaded', () => {
           : '<span class="text-muted">None discovered</span>';
 
         const nullMxText = item.is_null_mx
-          ? '<span style="color: var(--color-red-accent); font-weight:700;">RFC 7505 Null MX (Rejects Email)</span>'
-          : '<span style="color: #166534;">Clean (No Null MX record)</span>';
+          ? '<span style="color: var(--bounce-accent); font-weight:700;">RFC 7505 Null MX (Rejects Email)</span>'
+          : '<span style="color: var(--delivered-dark);">Clean (No Null MX record)</span>';
 
         const durationText = item.duration_ms !== undefined ? `${item.duration_ms} ms` : 'N/A';
         const providerName = (item.provider_info && item.provider_info.provider) ? item.provider_info.provider : 'Local Engine';
         const providerReason = (item.provider_info && item.provider_info.reason) ? item.provider_info.reason : '';
 
         detailsRow.innerHTML = `
-          <td colspan="10" style="padding: 0;">
+          <td colspan="9" style="padding: 0;">
             <div class="email-details-panel">
               <div class="details-grid">
                 <div class="detail-item">
@@ -625,7 +682,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   <span class="detail-value">${escapeHtml(item.domain_status || 'untested')}</span>
                 </div>
                 <div class="detail-item">
-                  <span class="detail-label">Discovered Mail Servers (MX)</span>
+                  <span class="detail-label">Configured Mail Servers (MX)</span>
                   <span class="detail-value">${mxRecordsList}</span>
                 </div>
                 <div class="detail-item">
@@ -669,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Attach Toggle Listeners
+    // Attach Toggle Listeners for Inline Details
     document.querySelectorAll('.btn-details-toggle').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -682,7 +739,186 @@ document.addEventListener('DOMContentLoaded', () => {
         renderResults();
       });
     });
+
+    // Attach Modal "Inspect" Listeners
+    document.querySelectorAll('.btn-inspect').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.getAttribute('data-index'), 10);
+        const item = items[idx];
+        if (item) {
+          openInspectModal(item);
+        }
+      });
+    });
   }
+
+  // ==========================================================================
+  // Inspection Modal (Inspired by MailCheck "Inspect" Dialog)
+  // ==========================================================================
+  function openInspectModal(item) {
+    if (!inspectModal) return;
+
+    modalEmailTitle.textContent = item.email;
+    modalStatusBadge.textContent = item.classification;
+    modalStatusBadge.className = `status-badge ${
+      item.classification.toLowerCase().includes('deliver') ? 'badge-delivered' :
+      item.classification.toLowerCase().includes('bounce') ? 'badge-bounce' : 'badge-unknown'
+    }`;
+
+    const parts = (item.email || '').split('@');
+    const localPart = parts[0] || '';
+    const domainPart = parts[1] || '';
+
+    const probe = item.smtp_probe || {};
+    const smtpSt = (probe.smtp_status || item.smtp_status || 'disabled').toUpperCase();
+    const smtpExp = probe.smtp_explanation || item.reason || '';
+
+    const mxListHtml = (item.mx_records && item.mx_records.length > 0)
+      ? item.mx_records.map(r => `<div class="mx-pill-item">${escapeHtml(r)}</div>`).join('')
+      : '<span class="text-muted" style="font-size:0.75rem;">None published</span>';
+
+    inspectModalBody.innerHTML = `
+      <!-- Primary Classification Evidence -->
+      <div class="modal-stage-card">
+        <div class="stage-card-title">
+          <span>Primary Classification Evidence</span>
+          <span class="status-badge ${modalStatusBadge.className}">${escapeHtml(item.classification)}</span>
+        </div>
+        <p style="font-size:0.8125rem; color:var(--text-secondary); line-height:1.5;">
+          ${escapeHtml(item.reason)}
+        </p>
+      </div>
+
+      <!-- Stage 1: RFC Format & Syntax -->
+      <div class="modal-stage-card">
+        <div class="stage-card-title">
+          <span>Stage 1: RFC Format &amp; Syntax</span>
+          <span class="indicator-pill ${item.syntax_valid ? 'pill-pass' : 'pill-fail'}">
+            ${item.syntax_valid ? 'PASS (RFC Valid)' : 'FAIL (Invalid)'}
+          </span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Local Part:</span>
+          <span class="modal-meta-val"><code>${escapeHtml(localPart)}</code></span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Domain Part:</span>
+          <span class="modal-meta-val"><code>${escapeHtml(domainPart)}</code></span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Disposable Check:</span>
+          <span class="modal-meta-val">${item.is_disposable ? '⚠ Disposable Service' : '✓ Clean (Legitimate Domain)'}</span>
+        </div>
+      </div>
+
+      <!-- Stage 2: DNS MX Mail Routing -->
+      <div class="modal-stage-card">
+        <div class="stage-card-title">
+          <span>Stage 2: DNS MX Mail Routing</span>
+          <span class="indicator-pill ${item.mx_status === 'mx_found' ? 'pill-pass' : (item.mx_status === 'implicit_mx_found' ? 'pill-pass' : 'pill-fail')}">
+            ${escapeHtml(item.mx_status || 'untested')}
+          </span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">RFC 7505 Null MX:</span>
+          <span class="modal-meta-val">${item.is_null_mx ? '<strong style="color:var(--bounce-accent);">Detected (Rejects all mail)</strong>' : 'Clean'}</span>
+        </div>
+        <div style="margin-top:0.45rem;">
+          <span class="modal-meta-label" style="font-size:0.75rem; font-weight:700; text-transform:uppercase;">Configured Mail Exchanges (Priority Sorted):</span>
+          <div class="mx-pill-list">
+            ${mxListHtml}
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage 3: SMTP Mailbox Probe -->
+      <div class="modal-stage-card">
+        <div class="stage-card-title">
+          <span>Stage 3: SMTP Mailbox Probe</span>
+          <span class="indicator-pill ${probe.smtp_status === 'accepted' ? 'pill-accepted' : (probe.smtp_status === 'rejected' ? 'pill-rejected' : 'pill-disabled')}">
+            ${escapeHtml(smtpSt)}
+          </span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Attempted:</span>
+          <span class="modal-meta-val">${probe.smtp_attempted ? 'Yes' : 'No (Skipped/Disabled)'}</span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Response Code:</span>
+          <span class="modal-meta-val">${probe.smtp_response_code ? escapeHtml(probe.smtp_response_code) : 'None'}</span>
+        </div>
+        <div class="modal-meta-row">
+          <span class="modal-meta-label">Probed Mail Server:</span>
+          <span class="modal-meta-val"><code>${probe.smtp_server ? escapeHtml(probe.smtp_server) : 'None'}</code></span>
+        </div>
+        ${smtpExp ? `
+          <div style="margin-top:0.45rem; font-size:0.75rem; color:var(--text-muted);">
+            <strong>Explanation:</strong> ${escapeHtml(smtpExp)}
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Understanding SMTP Timeouts & Provider Protections -->
+      <div class="modal-callout-note">
+        <strong>Understanding SMTP Timeouts &amp; Provider Protections:</strong>
+        <p style="margin-top:0.25rem;">
+          An SMTP timeout is never treated as proof that a mailbox is invalid. Cloud hosting environments (like Render) restrict outbound TCP port 25 to prevent spam abuse. When port 25 is blocked or inconclusive, EmailCheck honestly classifies uncertain addresses as <strong>Unknown</strong>.
+        </p>
+      </div>
+
+      <!-- Raw JSON Payload Viewer -->
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
+          <span style="font-size:0.6875rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted);">Raw Diagnostic Payload JSON:</span>
+          <button type="button" id="copyJsonBtn" class="btn btn-outline btn-xs" style="padding:0.15rem 0.5rem; font-size:0.6875rem;">Copy JSON</button>
+        </div>
+        <pre class="raw-json-box"><code>${escapeHtml(JSON.stringify(item, null, 2))}</code></pre>
+      </div>
+    `;
+
+    // Attach Copy JSON action
+    const copyJsonBtn = document.getElementById('copyJsonBtn');
+    if (copyJsonBtn) {
+      copyJsonBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(JSON.stringify(item, null, 2)).then(() => {
+          copyJsonBtn.textContent = 'Copied!';
+          setTimeout(() => copyJsonBtn.textContent = 'Copy JSON', 2000);
+          showToast('Diagnostic payload JSON copied to clipboard.', 'info');
+        }).catch(() => {
+          showToast('Failed to copy JSON.', 'error');
+        });
+      });
+    }
+
+    inspectModal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeInspectModal() {
+    if (!inspectModal) return;
+    inspectModal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  if (closeInspectModalBtn) closeInspectModalBtn.addEventListener('click', closeInspectModal);
+  if (modalDismissBtn) modalDismissBtn.addEventListener('click', closeInspectModal);
+
+  // Close modal when clicking outside modal card
+  if (inspectModal) {
+    inspectModal.addEventListener('click', (e) => {
+      if (e.target === inspectModal) {
+        closeInspectModal();
+      }
+    });
+  }
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && inspectModal && inspectModal.style.display === 'flex') {
+      closeInspectModal();
+    }
+  });
 
   // ==========================================================================
   // Filter Tabs Event Listeners
@@ -748,14 +984,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================================================
-  // RFC 4180 CSV Export
+  // RFC 4180 CSV Export (Retaining Complete Diagnostic Explanation)
   // ==========================================================================
   downloadCsvBtn.addEventListener('click', () => {
     if (!currentResults || currentResults.length === 0) {
       showToast('No results available to download.', 'error');
       return;
     }
-    exportResultsToCsv(currentResults, 'emailcheck_results');
+    exportResultsToCsv(currentResults, 'emailcheck_export');
   });
 
   function exportResultsToCsv(results, filePrefix) {
@@ -812,7 +1048,7 @@ document.addEventListener('DOMContentLoaded', () => {
         escapeCsvValue(item.provider_info ? item.provider_info.provider : 'Local Engine'),
         escapeCsvValue(item.duration_ms !== undefined ? item.duration_ms : ''),
         escapeCsvValue(item.checked_at || new Date().toISOString()),
-        escapeCsvValue(item.reason)
+        escapeCsvValue(item.reason) // Retains complete diagnostic explanation
       ].join(',');
     });
 
@@ -895,7 +1131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bannerClass = isReady ? 'verdict-ready' : (isReject ? 'verdict-reject' : 'verdict-inconclusive');
 
     const mxRecordsHtml = (data.mx_records && data.mx_records.length > 0)
-      ? `<ul class="domain-records-list">${data.mx_records.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`
+      ? `<ul class="domain-records-list" style="margin-top:0.4rem; padding-left:1.25rem;">${data.mx_records.map(r => `<li><code>${escapeHtml(r)}</code></li>`).join('')}</ul>`
       : '<p class="text-muted" style="margin-top:0.4rem; font-size:0.8125rem;">No MX or A/AAAA mail routing records published.</p>';
 
     domainResultCard.innerHTML = `
@@ -922,11 +1158,11 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="detail-item">
           <span class="detail-label">RFC 7505 Null MX</span>
-          <span class="detail-value">${data.is_null_mx ? '<strong style="color:var(--color-red-accent);">Detected (Rejects all mail)</strong>' : 'Clean (Not published)'}</span>
+          <span class="detail-value">${data.is_null_mx ? '<strong style="color:var(--bounce-accent);">Detected (Rejects all mail)</strong>' : 'Clean (Not published)'}</span>
         </div>
         <div class="detail-item">
           <span class="detail-label">Disposable Service</span>
-          <span class="detail-value">${data.is_disposable ? '<strong style="color:var(--color-amber-accent);">⚠ Yes (Temporary domain)</strong>' : 'Clean (Legitimate domain)'}</span>
+          <span class="detail-value">${data.is_disposable ? '<strong style="color:var(--unknown-amber-accent);">⚠ Yes (Temporary domain)</strong>' : 'Clean (Legitimate domain)'}</span>
         </div>
         <div class="detail-item">
           <span class="detail-label">Query Duration</span>
@@ -934,13 +1170,13 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
 
-      <div class="domain-records-box">
+      <div class="domain-records-box" style="margin-top:0.85rem; padding-top:0.65rem; border-top:1px solid var(--border-color);">
         <strong style="font-size:0.8125rem; color:var(--text-primary);">Configured Mail Exchangers:</strong>
         ${mxRecordsHtml}
       </div>
 
-      <div class="domain-disclaimer-notice">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+      <div class="domain-disclaimer-notice" style="margin-top:0.85rem; font-size:0.75rem; color:var(--text-muted); display:flex; gap:0.4rem; align-items:center;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
           <circle cx="12" cy="12" r="10"/>
           <line x1="12" y1="16" x2="12" y2="12"/>
           <line x1="12" y1="8" x2="12.01" y2="8"/>
@@ -1023,9 +1259,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ${dateStr} (${session.total} addresses)
           </div>
           <div class="session-pills">
-            <span class="session-pill" style="background:#ecfdf5; color:#065f46;">${valid} Likely to Deliver</span>
-            <span class="session-pill" style="background:#fef2f2; color:#991b1b;">${invalid} Likely to Bounce</span>
-            <span class="session-pill" style="background:#f1f5f9; color:#475569;">${unknown} Unknown</span>
+            <span class="session-pill" style="background:var(--delivered-bg); color:var(--delivered-dark); border:1px solid var(--delivered-border);">${valid} Likely to Deliver</span>
+            <span class="session-pill" style="background:var(--bounce-bg); color:var(--bounce-dark); border:1px solid var(--bounce-border);">${invalid} Likely to Bounce</span>
+            <span class="session-pill" style="background:var(--unknown-bg); color:var(--unknown-text); border:1px solid var(--unknown-border);">${unknown} Unknown</span>
           </div>
         </div>
         <div class="session-actions">
@@ -1103,7 +1339,25 @@ document.addEventListener('DOMContentLoaded', () => {
     updateHistoryUI();
   });
 
+  // ==========================================================================
+  // Live API Health Check Probe
+  // ==========================================================================
+  async function checkApiHealth() {
+    try {
+      const resp = await fetch('/health');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (apiStatusText) {
+          apiStatusText.textContent = data.status === 'healthy' ? 'Online' : 'Degraded';
+        }
+      }
+    } catch {
+      if (apiStatusText) apiStatusText.textContent = 'Offline';
+    }
+  }
+
   // Initialize
   updateInputCounter();
   updateHistoryUI();
+  checkApiHealth();
 });

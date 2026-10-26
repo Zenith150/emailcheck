@@ -115,15 +115,19 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
   - Classifies unverified recipient inboxes (when SMTP is unavailable/disabled and no provider key is configured) as **Unknown** with detailed, actionable diagnostics.
   - Marks temporary failures (SMTP 450 Greylisting) and catch-all servers as **Unknown**.
 - **Batch Processing with Memoization:** Efficient in-memory caching prevents redundant DNS lookups and HTTP requests for duplicate domains and addresses within the same batch (up to 100 emails).
-- **Modern Responsive Dashboard:**
-  - Real-time address counter (up to 100 per batch).
+- **Modern Responsive SaaS Dashboard:**
+  - Dark Mode & Light Mode theme switcher with system preference detection and local persistence.
+  - Three visual deliverability definition cards (*Likely to be delivered*, *Likely to bounce*, *Unknown*) distinguishing domain-level routing from mailbox-level existence.
+  - Real-time address counter (up to 100 per batch) with instant duplicate detection.
+  - Multi-stage animated verification progress indicator.
   - Four summary metric cards: **Total**, **Likely to be Delivered**, **Likely to Bounce**, and **Unknown**.
   - Interactive filter tabs (All, Likely to Deliver, Likely to Bounce, Unknown) and real-time search box.
   - Sorting and pagination for large batches.
-  - Collapsible per-row diagnostics showing DNS MX, HTTP Provider, and detailed SMTP Probe outputs.
+  - Modal-based **Deep Inspection Dialog** showcasing stage-by-stage diagnostics (RFC Syntax, DNS MX with priority sorting and Null MX checks, SMTP socket handshake / timeout analysis) and formatted raw JSON viewer with one-click copy.
+  - Collapsible inline per-row diagnostics showing DNS MX, HTTP Provider, and detailed SMTP Probe outputs.
   - Dedicated **Domain Diagnostics** lookup tool.
   - Local **Verification History** storing recent runs.
-  - One-click RFC 4180 compliant **CSV Export** with all diagnostic and SMTP columns.
+  - One-click RFC 4180 compliant **CSV Export** with all diagnostic, reasoning, and SMTP columns.
 - **Production-Ready Backend:** Flask REST API with sliding-window rate limiting, input sanitization, health monitoring (`/health`), and WSGI production server (`gunicorn`).
 
 ---
