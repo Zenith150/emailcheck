@@ -330,16 +330,16 @@ To add or update provider credentials on Render:
 
 ## Running Automated Tests
 
-The test suite contains **65 automated tests** covering syntax validation, normalization rules, disposable domain detection, mocked DNS MX resolution, RFC 7505 Null MX records, provider API integration adapters (Abstract, Hunter, ZeroBounce, Local), genuine SMTP probing protocol exchanges (`smtp_probe.py`), opt-in checkbox request extraction (`check_smtp` & `smtp_check`), server configuration security controls, circuit breaker tripping, catch-all detection, quota handling, batch deduplication, and REST API endpoints.
+The test suite contains **70 automated tests** covering syntax validation, normalization rules, disposable domain detection, mocked DNS MX resolution, RFC 7505 Null MX records, provider API integration adapters (Abstract, Hunter, ZeroBounce, Local), genuine SMTP probing protocol exchanges (`smtp_probe.py`), opt-in checkbox request extraction (`check_smtp` & `smtp_check`), server configuration security controls, circuit breaker tripping, catch-all detection, quota handling, the three assignment deliverability classifications (`Likely to be delivered`, `Likely to bounce`, `Unknown`), unverified mailbox shortened explanations, batch deduplication, and REST API endpoints.
 
 To run the automated tests:
 ```bash
 python -m unittest discover tests -v
 ```
 
-All 65 tests run isolated from external network dependencies via unittest mocks and complete in under 1 second:
+All 70 tests run isolated from external network dependencies via unittest mocks and complete in under 2 seconds:
 ```
-Ran 65 tests in 0.349s: OK
+Ran 70 tests in 1.858s: OK
 ```
 
 ---
