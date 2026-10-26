@@ -1,9 +1,16 @@
 """
-EmailCheck - Verification Core Logic
-Provides syntax validation, DNS/MX record verification (with RFC 5321 implicit MX fallback),
-and safe, non-invasive SMTP recipient checks.
+EmailCheck - Verification Core Logic (v2.0)
+Implements a 7-stage non-invasive email verification pipeline:
+1. Syntax Validation (RFC 5322)
+2. Normalization (preserves local-part, normalizes domain)
+3. Disposable Email Detection (curated dataset & provider tags)
+4. DNS Resolution & Domain Validation
+5. MX Record Validation (including RFC 7505 Null MX & RFC 5321 Implicit MX)
+6. Provider-based HTTPS Inbox Verification (Abstract, Hunter, ZeroBounce, or Local Fallback)
+7. Result Classification (Valid, Invalid, Risky, Unknown)
 """
 
+import os
 import re
 import socket
 import smtplib
@@ -18,11 +25,12 @@ try:
 except ImportError:
     HAS_EMAIL_VALIDATOR = False
 
+from providers import is_disposable_domain, get_verification_provider, BaseVerificationProvider
 
 # Reliable fallback nameservers to avoid local/virtual adapter timeouts
 PUBLIC_NAMESERVERS = ['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']
 
-# RFC 5322 compliant regex for fallback / secondary validation
+# RFC 5322 compliant regex for secondary validation
 EMAIL_REGEX = re.compile(
     r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+"
     r"@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
@@ -42,37 +50,56 @@ def get_configured_resolver(timeout: float = 3.5) -> dns.resolver.Resolver:
     return resolver
 
 
+def normalize_email(email_str: str) -> Tuple[str, str, str]:
+    """
+    Normalizes an email address:
+    - Trims leading/trailing whitespace.
+    - Lowers domain part and strips trailing dots.
+    - Preserves local-part casing per RFC 5321 (do not lowercase local-part).
+    Returns (local_part, normalized_domain, normalized_full_email).
+    """
+    cleaned = str(email_str or "").strip()
+    if "@" in cleaned:
+        parts = cleaned.split("@", 1)
+        local_part = parts[0]
+        domain = parts[1].strip().lower().rstrip(".")
+        normalized_full = f"{local_part}@{domain}"
+        return local_part, domain, normalized_full
+    return cleaned, "", cleaned
+
+
 def validate_syntax(email: str) -> Tuple[bool, str, str, Optional[str]]:
     """
-    Validates email syntax against RFC standards.
+    Stage 1 & 2: Validates email syntax against RFC standards and normalizes domain.
     Returns:
-        (is_valid: bool, local_part: str, domain: str, error_message: Optional[str])
+        (is_valid: bool, local_part: str, normalized_domain: str, error_message: Optional[str])
     """
     if not email or not isinstance(email, str):
         return False, "", "", "Email address is empty or not a valid string."
 
-    email = email.strip()
-    if len(email) > 254:
+    raw = email.strip()
+    if len(raw) > 254:
         return False, "", "", "Email exceeds maximum RFC length of 254 characters."
 
-    if "@" not in email:
+    if "@" not in raw:
         return False, "", "", "Missing '@' symbol in email address."
 
-    parts = email.split("@")
+    parts = raw.split("@")
     if len(parts) != 2:
         return False, "", "", "Email contains multiple '@' symbols."
 
-    local_part, domain = parts[0], parts[1]
+    local_part, raw_domain = parts[0], parts[1]
 
     if not local_part:
-        return False, "", domain, "Missing local part before '@'."
+        return False, "", raw_domain, "Missing local part before '@'."
     if len(local_part) > 64:
-        return False, local_part, domain, "Local part exceeds 64 characters."
+        return False, local_part, raw_domain, "Local part exceeds 64 characters."
     if local_part.startswith(".") or local_part.endswith("."):
-        return False, local_part, domain, "Local part cannot start or end with a dot."
+        return False, local_part, raw_domain, "Local part cannot start or end with a dot."
     if ".." in local_part:
-        return False, local_part, domain, "Local part cannot contain consecutive dots ('..')."
+        return False, local_part, raw_domain, "Local part cannot contain consecutive dots ('..')."
 
+    domain = raw_domain.strip().lower().rstrip(".")
     if not domain:
         return False, local_part, "", "Missing domain part after '@'."
     if len(domain) > 253:
@@ -81,27 +108,27 @@ def validate_syntax(email: str) -> Tuple[bool, str, str, Optional[str]]:
         return False, local_part, domain, "Domain cannot contain consecutive dots ('..')."
     if "." not in domain:
         return False, local_part, domain, "Domain must contain a valid top-level domain (TLD)."
-    
+
     tld = domain.split(".")[-1]
     if len(tld) < 2:
         return False, local_part, domain, "Top-level domain (TLD) must be at least 2 characters."
 
-    # Validate with email-validator library if available
+    # Validate with email-validator library if installed
     if HAS_EMAIL_VALIDATOR:
         try:
-            val = ext_validate_email(email, check_deliverability=False)
-            normalized_domain = val.domain.lower()
-            return True, val.local_part, normalized_domain, None
+            val = ext_validate_email(raw, check_deliverability=False)
+            norm_domain = val.domain.lower().rstrip(".")
+            return True, val.local_part, norm_domain, None
         except EmailNotValidError as err:
-            return False, local_part, domain.lower(), str(err)
+            return False, local_part, domain, str(err)
         except Exception as ex:
-            return False, local_part, domain.lower(), f"Syntax validation failed: {str(ex)}"
+            return False, local_part, domain, f"Syntax validation failed: {str(ex)}"
 
     # Regex fallback
-    if not EMAIL_REGEX.match(email):
-        return False, local_part, domain.lower(), "Email format does not adhere to RFC 5322 syntax."
+    if not EMAIL_REGEX.match(raw):
+        return False, local_part, domain, "Email format does not adhere to RFC 5322 syntax."
 
-    return True, local_part, domain.lower(), None
+    return True, local_part, domain, None
 
 
 def check_domain_dns(
@@ -110,13 +137,14 @@ def check_domain_dns(
     timeout: float = 3.5
 ) -> Dict[str, Any]:
     """
-    Checks DNS records for the domain:
+    Stage 4 & 5: Checks DNS records for the domain:
     1. Query MX records.
-    2. Fallback to A/AAAA records (RFC 5321 Implicit MX) if no MX is found.
+    2. Check for RFC 7505 Null MX record ('0 .').
+    3. Fallback to A/AAAA records (RFC 5321 Implicit MX) if no MX is found.
     Handles NXDOMAIN, timeouts, and missing records.
     """
     res = resolver or get_configured_resolver(timeout=timeout)
-    domain_clean = domain.strip().rstrip(".")
+    domain_clean = domain.strip().lower().rstrip(".")
 
     # Handle IDNA encoding for internationalized domains
     try:
@@ -127,9 +155,10 @@ def check_domain_dns(
     result = {
         "domain": domain_clean,
         "domain_status": "unknown",  # "exists", "nonexistent", "dns_timeout", "dns_error"
-        "mx_status": "unknown",      # "mx_found", "implicit_mx_found", "no_records", "none", "dns_error"
-        "mx_records": [],            # List of records e.g. ["mail.example.com (pref: 10)"]
+        "mx_status": "unknown",      # "mx_found", "implicit_mx_found", "null_mx", "no_records", "none", "dns_error"
+        "mx_records": [],            # List of formatted records
         "primary_mx": None,          # Hostname of highest priority MX
+        "is_null_mx": False,         # RFC 7505 Null MX flag
         "error": None
     }
 
@@ -137,11 +166,24 @@ def check_domain_dns(
     try:
         mx_answers = res.resolve(domain_ascii, "MX")
         sorted_mx = sorted(mx_answers, key=lambda r: r.preference)
+
+        # Check for RFC 7505 Null MX record
+        for r in sorted_mx:
+            host_clean = str(r.exchange).strip().rstrip(".")
+            # RFC 7505: single MX with priority 0 and host "." or empty
+            if host_clean == "" or host_clean == ".":
+                result["domain_status"] = "exists"
+                result["mx_status"] = "null_mx"
+                result["is_null_mx"] = True
+                result["mx_records"] = ["0 . (RFC 7505 Null MX: Domain explicitly does not accept email)"]
+                result["error"] = "Domain publishes an RFC 7505 Null MX record ('0 .'), explicitly declaring that it does not accept email."
+                return result
+
         records_list = []
         for r in sorted_mx:
             host = str(r.exchange).rstrip(".")
             records_list.append(f"{host} (priority {r.preference})")
-        
+
         result["domain_status"] = "exists"
         result["mx_status"] = "mx_found"
         result["mx_records"] = records_list
@@ -149,7 +191,7 @@ def check_domain_dns(
         return result
 
     except dns.resolver.NXDOMAIN:
-        # Domain does not exist
+        # Domain does not exist in DNS
         result["domain_status"] = "nonexistent"
         result["mx_status"] = "none"
         result["error"] = "Domain does not exist in DNS (NXDOMAIN)."
@@ -166,7 +208,6 @@ def check_domain_dns(
             result["primary_mx"] = domain_ascii
             return result
         except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
-            # Check AAAA as well
             try:
                 aaaa_answers = res.resolve(domain_ascii, "AAAA")
                 ipv6_list = [str(a) for a in aaaa_answers]
@@ -204,138 +245,6 @@ def check_domain_dns(
         return result
 
 
-def check_smtp_recipient(
-    email: str,
-    mx_host: str,
-    sender: str = "verify@emailcheck.app",
-    timeout: float = 3.5
-) -> Dict[str, Any]:
-    """
-    Safely attempts an SMTP handshake with the primary mail server.
-    CRITICAL SAFETY RULES:
-    1. NEVER send an email.
-    2. NEVER issue SMTP DATA or transmit message bodies.
-    3. Handles timeouts, connection refused, greylisting, and catch-all detection.
-    4. Quits immediately after recipient verification.
-    """
-    result = {
-        "smtp_attempted": True,
-        "smtp_status": "unknown",
-        # statuses: "mailbox_accepted", "mailbox_rejected", "catch_all",
-        #           "temporary_failure", "unverified", "connection_failed", "timeout", "skipped"
-        "code": None,
-        "is_catch_all": False,
-        "reason": None
-    }
-
-    if not mx_host:
-        result["smtp_attempted"] = False
-        result["smtp_status"] = "skipped"
-        result["reason"] = "No MX host available for SMTP verification."
-        return result
-
-    smtp_client = None
-    try:
-        # Establish connection with short timeout
-        smtp_client = smtplib.SMTP(timeout=timeout)
-        code, resp = smtp_client.connect(mx_host, 25)
-        
-        # Initial greeting check
-        if code >= 400:
-            result["smtp_status"] = "connection_failed"
-            result["code"] = code
-            result["reason"] = f"Mail server rejected connection with code {code}."
-            return result
-
-        # HELO / EHLO
-        smtp_client.ehlo_or_helo_if_needed()
-
-        # MAIL FROM
-        code, resp = smtp_client.mail(sender)
-        if code >= 400:
-            result["smtp_status"] = "unverified"
-            result["code"] = code
-            result["reason"] = f"Server rejected MAIL FROM ({code}): {resp.decode('utf-8', 'ignore') if isinstance(resp, bytes) else resp}"
-            return result
-
-        # RCPT TO target email
-        code, resp = smtp_client.rcpt(email)
-        resp_str = resp.decode("utf-8", "ignore") if isinstance(resp, bytes) else str(resp)
-        result["code"] = code
-
-        if code == 250:
-            # Address accepted. Now perform non-invasive catch-all test
-            # using a random nonexistent mailbox name on the same domain
-            domain = email.split("@")[-1]
-            probe_user = "nonexistent_probe_check_7921x"
-            probe_email = f"{probe_user}@{domain}"
-            
-            try:
-                probe_code, probe_resp = smtp_client.rcpt(probe_email)
-                if probe_code == 250:
-                    # Server accepts ANY recipient -> Catch-all domain
-                    result["smtp_status"] = "catch_all"
-                    result["is_catch_all"] = True
-                    result["reason"] = "Domain mail server is configured as catch-all (accepts non-existent addresses)."
-                    return result
-            except Exception:
-                pass  # If catch-all probe fails, continue with 250 result
-
-            result["smtp_status"] = "mailbox_accepted"
-            result["reason"] = "Mail server accepted recipient in SMTP handshake (250 OK)."
-            return result
-
-        elif code in (550, 551, 552, 553, 554):
-            result["smtp_status"] = "mailbox_rejected"
-            result["reason"] = f"Mail server explicitly rejected address ({code}): {resp_str.strip()}"
-            return result
-
-        elif code in (421, 450, 451, 452):
-            result["smtp_status"] = "temporary_failure"
-            result["reason"] = f"Temporary mail server response / greylisting ({code}): {resp_str.strip()}"
-            return result
-
-        elif code == 252:
-            result["smtp_status"] = "unverified"
-            result["reason"] = "Mail server refuses to verify mailbox existence (SMTP 252)."
-            return result
-
-        else:
-            result["smtp_status"] = "ambiguous"
-            result["reason"] = f"Mail server returned ambiguous status ({code}): {resp_str.strip()}"
-            return result
-
-    except (socket.timeout, TimeoutError):
-        result["smtp_status"] = "timeout"
-        result["reason"] = "SMTP connection timed out (server unreachable or port 25 restricted)."
-        return result
-
-    except (ConnectionRefusedError, socket.error, OSError) as err:
-        result["smtp_status"] = "connection_failed"
-        result["reason"] = f"SMTP connection failed (port 25 blocked by provider or host unreachable): {str(err)}"
-        return result
-
-    except smtplib.SMTPException as err:
-        result["smtp_status"] = "smtp_error"
-        result["reason"] = f"SMTP protocol error: {str(err)}"
-        return result
-
-    except Exception as err:
-        result["smtp_status"] = "unknown"
-        result["reason"] = f"Unexpected SMTP error: {str(err)}"
-        return result
-
-    finally:
-        if smtp_client:
-            try:
-                smtp_client.quit()
-            except Exception:
-                try:
-                    smtp_client.close()
-                except Exception:
-                    pass
-
-
 def test_smtp_outbound_capability(host: str = "aspmx.l.google.com", port: int = 25, timeout: float = 2.0) -> bool:
     """
     Tests if outbound port 25 connections can be established from the current host.
@@ -357,104 +266,248 @@ def test_smtp_outbound_capability(host: str = "aspmx.l.google.com", port: int = 
                 pass
 
 
+def check_smtp_recipient(
+    email: str,
+    mx_host: str,
+    sender: str = "verify@emailcheck.app",
+    timeout: float = 3.5
+) -> Dict[str, Any]:
+    """
+    Optional direct SMTP check for non-restricted hosting environments.
+    Disabled by default on Render and cloud hosts where port 25 is restricted.
+    Never sends emails or issues SMTP DATA command.
+    """
+    result = {
+        "smtp_attempted": True,
+        "smtp_status": "unknown",
+        "code": None,
+        "is_catch_all": False,
+        "reason": None
+    }
+
+    if not mx_host:
+        result["smtp_attempted"] = False
+        result["smtp_status"] = "skipped"
+        result["reason"] = "No MX host available for direct SMTP."
+        return result
+
+    smtp_client = None
+    try:
+        smtp_client = smtplib.SMTP(timeout=timeout)
+        code, resp = smtp_client.connect(mx_host, 25)
+        if code >= 400:
+            result["smtp_status"] = "connection_failed"
+            result["code"] = code
+            result["reason"] = f"Mail server rejected connection with code {code}."
+            return result
+
+        smtp_client.ehlo_or_helo_if_needed()
+        code, resp = smtp_client.mail(sender)
+        if code >= 400:
+            result["smtp_status"] = "unverified"
+            result["code"] = code
+            result["reason"] = f"Server rejected MAIL FROM ({code})."
+            return result
+
+        code, resp = smtp_client.rcpt(email)
+        result["code"] = code
+
+        if code == 250:
+            domain = email.split("@")[-1]
+            probe_email = f"nonexistent_probe_check_7921x@{domain}"
+            try:
+                p_code, _ = smtp_client.rcpt(probe_email)
+                if p_code == 250:
+                    result["smtp_status"] = "catch_all"
+                    result["is_catch_all"] = True
+                    result["reason"] = "Domain mail server is configured as catch-all."
+                    return result
+            except Exception:
+                pass
+
+            result["smtp_status"] = "mailbox_accepted"
+            result["reason"] = "Mail server accepted recipient in SMTP handshake (250 OK)."
+            return result
+
+        elif code in (550, 551, 552, 553, 554):
+            result["smtp_status"] = "mailbox_rejected"
+            result["reason"] = f"Mail server explicitly rejected address ({code})."
+            return result
+
+        elif code in (421, 450, 451, 452):
+            result["smtp_status"] = "temporary_failure"
+            result["reason"] = f"Temporary mail server response / greylisting ({code})."
+            return result
+        else:
+            result["smtp_status"] = "unknown"
+            result["reason"] = f"Inconclusive SMTP response code {code}."
+            return result
+
+    except (socket.timeout, TimeoutError):
+        result["smtp_status"] = "timeout"
+        result["reason"] = "Direct SMTP connection timed out (port 25 restricted or host unreachable)."
+        return result
+    except (ConnectionRefusedError, socket.error, OSError) as err:
+        result["smtp_status"] = "connection_failed"
+        result["reason"] = f"Direct SMTP connection failed (port 25 restricted): {str(err)}"
+        return result
+    except Exception as err:
+        result["smtp_status"] = "unknown"
+        result["reason"] = f"SMTP error: {str(err)}"
+        return result
+    finally:
+        if smtp_client:
+            try:
+                smtp_client.quit()
+            except Exception:
+                try:
+                    smtp_client.close()
+                except Exception:
+                    pass
+
+
 def classify_result(
     syntax_valid: bool,
     domain_status: str,
     mx_status: str,
-    smtp_info: Optional[Dict[str, Any]],
+    is_disposable: bool,
+    provider_res: Optional[Dict[str, Any]] = None,
+    smtp_info: Optional[Dict[str, Any]] = None,
     syntax_error: Optional[str] = None,
     domain_error: Optional[str] = None
-) -> Tuple[str, str]:
+) -> Tuple[str, str, str]:
     """
-    Determines the final classification and human-readable explanation:
-    - Likely to be Delivered
-    - Likely to Bounce
-    - Unknown
+    Stage 7: Transparent, multi-factor result classification.
+    Returns:
+        (classification: str, status_category: str, explanation: str)
+    Classifications:
+        - "Valid" / "Likely to be Delivered": Valid syntax, domain exists, MX valid, not disposable, recipient verified.
+        - "Invalid" / "Likely to Bounce": Syntax invalid, NXDOMAIN, Null MX, no MX/A records, or mailbox confirmed invalid.
+        - "Risky": Disposable domain, catch-all server, role-based email, or domain valid but recipient unverified.
+        - "Unknown": DNS timeout, DNS error, provider timeout, or quota exceeded.
     """
     # 1. Syntax Check
     if not syntax_valid:
         msg = f"Invalid email syntax: {syntax_error or 'malformed structure'}."
-        return "Likely to Bounce", msg
+        return "Invalid", "invalid", msg
 
     # 2. Domain / DNS Checks
     if domain_status == "nonexistent":
-        return "Likely to Bounce", "The domain does not exist in DNS (NXDOMAIN). Mail sent to this address will bounce."
+        return "Invalid", "invalid", "The domain does not exist in DNS (NXDOMAIN). Mail sent to this address will bounce."
 
+    # 3. RFC 7505 Null MX Check
+    if mx_status == "null_mx":
+        return "Invalid", "invalid", "Domain publishes an RFC 7505 Null MX record ('0 .'), explicitly declaring that it does not accept email."
+
+    # 4. Missing Mail Routing
     if mx_status == "no_records":
-        return "Likely to Bounce", "Domain exists, but has no MX or A records configured to receive email."
+        return "Invalid", "invalid", "Domain exists, but has no MX or A records configured to receive email."
 
+    # 5. DNS Errors / Timeouts
     if domain_status in ("dns_timeout", "dns_error") or mx_status in ("dns_timeout", "dns_error"):
-        return "Unknown", f"DNS query could not be completed ({domain_error or 'timeout/server failure'})."
+        return "Unknown", "unknown", f"DNS query could not be completed ({domain_error or 'timeout/server failure'})."
 
-    # 3. SMTP Verification Checks (if attempted)
+    # 6. Disposable Email Check
+    if is_disposable:
+        return "Risky", "risky", "Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). These inboxes are short-lived and risky for deliverability."
+
+    # 7. Provider-Based Inbox Verification (HTTPS)
+    if provider_res:
+        p_status = provider_res.get("status")
+        p_reason = provider_res.get("reason", "")
+        p_disposable = provider_res.get("is_disposable")
+        p_catchall = provider_res.get("is_catch_all")
+
+        if p_disposable:
+            return "Risky", "risky", "Verification provider flagged domain as a temporary or disposable email address."
+
+        if p_status == "deliverable":
+            return "Valid", "valid", f"Syntax valid, active MX routing verified, and recipient inbox confirmed deliverable ({p_reason})."
+
+        elif p_status == "undeliverable":
+            return "Invalid", "invalid", f"Recipient inbox confirmed invalid or undeliverable ({p_reason})."
+
+        elif p_status == "risky" or p_catchall:
+            return "Risky", "risky", f"Address flagged as risky ({p_reason})."
+
+        elif p_status == "unavailable":
+            # Provider is unconfigured (Local engine): domain is valid, but recipient inbox is unverified
+            return "Risky", "risky", (
+                "Domain mail routing is active (MX verified). Recipient-level verification is unverified because no provider API key is configured. "
+                "Note: A valid domain does not guarantee individual recipient inbox existence."
+            )
+
+        elif p_status == "unknown":
+            return "Unknown", "unknown", f"Recipient inbox verification was inconclusive ({p_reason})."
+
+    # 8. Optional Direct SMTP Check (if enabled and attempted)
     if smtp_info and smtp_info.get("smtp_attempted"):
         smtp_status = smtp_info.get("smtp_status")
         smtp_reason = smtp_info.get("reason", "")
         is_catch_all = smtp_info.get("is_catch_all", False)
 
         if smtp_status == "mailbox_rejected":
-            return "Likely to Bounce", f"Mail server explicitly rejected mailbox: {smtp_reason}."
-
+            return "Invalid", "invalid", f"Mail server explicitly rejected mailbox: {smtp_reason}."
         if smtp_status == "catch_all" or is_catch_all:
-            return "Unknown", "Domain server is configured as catch-all (accepts any mailbox). Individual mailbox existence cannot be confirmed."
-
+            return "Risky", "risky", "Domain server is configured as catch-all (accepts any mailbox). Individual mailbox existence cannot be confirmed."
         if smtp_status in ("connection_failed", "timeout"):
-            return "Unknown", "Outbound SMTP connection was blocked or timed out (standard mail port 25 restricted on hosting platform). Mail routing is valid, but specific mailbox existence cannot be confirmed."
-
-        if smtp_status in ("temporary_failure", "unverified", "ambiguous", "smtp_error"):
-            return "Unknown", f"SMTP verification inconclusive ({smtp_reason})."
-
+            return "Unknown", "unknown", "Outbound direct SMTP connection was blocked or timed out (standard mail port 25 restricted on hosting platform). Mail routing is valid, but specific mailbox existence cannot be confirmed."
         if smtp_status == "mailbox_accepted":
-            return "Likely to be Delivered", "Syntax is valid, MX routing is active, and mail server accepted recipient in SMTP handshake. Note: Inbox delivery depends on spam filters and recipient policies."
+            return "Valid", "valid", "Syntax valid, MX routing verified, and mail server accepted recipient in SMTP handshake."
 
-    # 4. Standard DNS Mode (Valid syntax + verified MX routing, non-invasive)
-    if mx_status in ("mx_found", "implicit_mx_found"):
-        routing_desc = "active MX mail routing" if mx_status == "mx_found" else "implicit MX (A/AAAA) fallback routing"
-        return "Likely to be Delivered", (
-            f"Valid syntax and {routing_desc} verified. "
-            "Note: This confirms the domain is prepared to receive mail, but is not an absolute guarantee of inbox delivery."
-        )
-
-    return "Unknown", "Unable to establish verification status based on available non-invasive checks."
+    # 9. Fallback if no provider and no SMTP attempted:
+    # Explicitly distinguish domain-level validation from recipient-level verification!
+    return "Risky", "risky", (
+        "Valid syntax and active MX routing verified. Recipient inbox verification is unverified. "
+        "Domain is prepared to receive mail, but recipient existence cannot be guaranteed without HTTPS provider verification."
+    )
 
 
 def verify_single_email(
     email_str: str,
     resolver: Optional[dns.resolver.Resolver] = None,
+    provider: Optional[BaseVerificationProvider] = None,
     perform_smtp: bool = False,
     domain_cache: Optional[Dict[str, Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
-    Performs complete verification pipeline for a single email address.
-    Utilizes domain_cache to prevent duplicate DNS/MX resolutions.
+    Performs complete 7-stage verification pipeline for a single email address.
     """
-    raw_email = str(email_str).strip()
-    
-    # Syntax validation
-    syntax_valid, local_part, domain, syntax_err = validate_syntax(raw_email)
+    raw_email = str(email_str or "").strip()
+    local_part, norm_domain, normalized_email = normalize_email(raw_email)
+
+    # Stage 1 & 2: Syntax validation
+    syntax_valid, _, domain, syntax_err = validate_syntax(raw_email)
 
     if not syntax_valid:
-        classification, reason = classify_result(
+        classification, status_cat, reason = classify_result(
             syntax_valid=False,
             domain_status="untested",
             mx_status="untested",
-            smtp_info=None,
+            is_disposable=False,
             syntax_error=syntax_err
         )
         return {
             "email": raw_email,
+            "normalized_email": normalized_email,
             "syntax_valid": False,
-            "domain": domain,
+            "domain": domain or norm_domain,
             "domain_status": "untested",
             "mx_status": "untested",
             "mx_records": [],
+            "is_disposable": False,
+            "recipient_status": "untested",
+            "provider_info": None,
             "smtp_status": "skipped",
-            "smtp_details": None,
             "classification": classification,
+            "status_category": status_cat,
             "reason": reason
         }
 
-    # Domain DNS check (with memoization)
+    # Stage 3: Disposable Domain Detection
+    disposable = is_disposable_domain(domain)
+
+    # Stage 4 & 5: Domain DNS check (with memoization)
     if domain_cache is not None and domain in domain_cache:
         dns_result = domain_cache[domain]
     else:
@@ -468,39 +521,60 @@ def verify_single_email(
     primary_mx = dns_result.get("primary_mx")
     dns_err = dns_result.get("error")
 
-    # If domain doesn't exist or has DNS errors, don't attempt SMTP
+    # If domain doesn't exist, has Null MX, or has DNS error, do not call provider
+    provider_res = None
     smtp_info = None
-    if perform_smtp and mx_status in ("mx_found", "implicit_mx_found") and primary_mx:
-        smtp_info = check_smtp_recipient(raw_email, primary_mx)
-    else:
-        smtp_info = {
-            "smtp_attempted": False,
-            "smtp_status": "skipped",
-            "reason": "SMTP verification not requested or mail host unavailable."
-        }
 
-    classification, reason = classify_result(
+    if domain_status == "exists" and mx_status in ("mx_found", "implicit_mx_found"):
+        # Stage 6: Provider-based verification over HTTPS (port 443)
+        active_provider = provider or get_verification_provider()
+        provider_res = active_provider.verify_recipient(normalized_email)
+
+        # Check if provider detected disposable
+        if provider_res.get("is_disposable"):
+            disposable = True
+
+        # Optional legacy direct SMTP check (only if explicitly requested and enabled)
+        enable_direct_smtp = os.environ.get("ENABLE_DIRECT_SMTP", "false").lower() == "true"
+        if perform_smtp and enable_direct_smtp and primary_mx:
+            smtp_info = check_smtp_recipient(normalized_email, primary_mx)
+
+    # Stage 7: Result classification
+    classification, status_cat, reason = classify_result(
         syntax_valid=True,
         domain_status=domain_status,
         mx_status=mx_status,
+        is_disposable=disposable,
+        provider_res=provider_res,
         smtp_info=smtp_info,
         domain_error=dns_err
     )
 
+    recipient_status = "untested"
+    if provider_res:
+        recipient_status = provider_res.get("status", "unknown")
+    elif smtp_info:
+        recipient_status = smtp_info.get("smtp_status", "unknown")
+
     return {
         "email": raw_email,
+        "normalized_email": normalized_email,
         "syntax_valid": True,
         "domain": domain,
         "domain_status": domain_status,
         "mx_status": mx_status,
         "mx_records": mx_records,
-        "smtp_status": smtp_info.get("smtp_status", "skipped"),
-        "smtp_details": {
-            "code": smtp_info.get("code"),
-            "is_catch_all": smtp_info.get("is_catch_all", False),
-            "reason": smtp_info.get("reason")
-        } if smtp_info.get("smtp_attempted") else None,
+        "is_disposable": disposable,
+        "recipient_status": recipient_status,
+        "provider_info": {
+            "provider": provider_res.get("provider") if provider_res else "none",
+            "status": provider_res.get("status") if provider_res else "untested",
+            "score": provider_res.get("score") if provider_res else None,
+            "reason": provider_res.get("reason") if provider_res else None
+        } if provider_res else None,
+        "smtp_status": smtp_info.get("smtp_status", "skipped") if smtp_info else recipient_status,
         "classification": classification,
+        "status_category": status_cat,
         "reason": reason
     }
 
@@ -508,14 +582,14 @@ def verify_single_email(
 def verify_email_list(
     emails: List[str],
     perform_smtp: bool = False,
+    provider: Optional[BaseVerificationProvider] = None,
     max_emails: int = 100
 ) -> Dict[str, Any]:
     """
-    Verifies a list of email addresses.
-    - Limits size to max_emails (default 100).
-    - Caches domain and email lookups to optimize performance and prevent repeated DNS/SMTP queries.
+    Verifies a batch of email addresses up to max_emails (default 100).
+    - Caches domain and email lookups.
     - Preserves input order in results.
-    - Produces aggregate summary counts.
+    - Computes summary counts for Valid, Invalid, Risky, and Unknown.
     """
     if not isinstance(emails, list):
         raise ValueError("Input 'emails' must be a list of strings.")
@@ -527,30 +601,35 @@ def verify_email_list(
         raise ValueError(f"Too many addresses. Maximum allowed per request is {max_emails}.")
 
     resolver = get_configured_resolver(timeout=3.5)
+    active_provider = provider or get_verification_provider()
     domain_cache: Dict[str, Dict[str, Any]] = {}
     email_cache: Dict[str, Dict[str, Any]] = {}
 
     results = []
     summary = {
         "total": len(emails),
+        "valid": 0,
+        "invalid": 0,
+        "risky": 0,
+        "unknown": 0,
+        # Backward-compatible aliases for existing frontends/consumers:
         "likely_to_deliver": 0,
-        "likely_to_bounce": 0,
-        "unknown": 0
+        "likely_to_bounce": 0
     }
 
     for item in emails:
         raw_email = str(item).strip() if item is not None else ""
-        cache_key = (raw_email.lower(), perform_smtp)
+        cache_key = raw_email.lower()
 
         if cache_key in email_cache:
-            # Duplicate address within request: reuse cached verification
             cached_res = dict(email_cache[cache_key])
-            cached_res["email"] = raw_email  # Preserve original casing
+            cached_res["email"] = raw_email  # Preserve input casing
             res = cached_res
         else:
             res = verify_single_email(
                 raw_email,
                 resolver=resolver,
+                provider=active_provider,
                 perform_smtp=perform_smtp,
                 domain_cache=domain_cache
             )
@@ -558,18 +637,22 @@ def verify_email_list(
 
         results.append(res)
 
-        # Count summary
-        classification = res["classification"]
-        if classification == "Likely to be Delivered":
+        cat = res.get("status_category", "unknown").lower()
+        if cat == "valid":
+            summary["valid"] += 1
             summary["likely_to_deliver"] += 1
-        elif classification == "Likely to Bounce":
+        elif cat == "invalid":
+            summary["invalid"] += 1
             summary["likely_to_bounce"] += 1
+        elif cat == "risky":
+            summary["risky"] += 1
         else:
             summary["unknown"] += 1
 
     return {
         "success": True,
         "total": len(results),
+        "provider": active_provider.name,
         "summary": summary,
         "results": results
     }

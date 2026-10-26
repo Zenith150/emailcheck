@@ -1,6 +1,7 @@
 """
-End-to-end live testing script for EmailCheck server.
-Starts server, sends requests to /health and /api/verify, validates responses, and exits.
+End-to-end live testing script for EmailCheck server (v2.0).
+Starts local server, exercises health check and multi-stage verification pipeline,
+verifying disposable filtering, NXDOMAIN, and RFC syntax without port 25.
 """
 
 import os
@@ -14,6 +15,7 @@ def run_test():
     env = os.environ.copy()
     env["PORT"] = "5005"
     env["FLASK_DEBUG"] = "0"
+    env["EMAIL_VERIFICATION_PROVIDER"] = "none"
 
     print("Starting EmailCheck test server on port 5005...")
     proc = subprocess.Popen([sys.executable, "app.py"], env=env)
@@ -29,15 +31,17 @@ def run_test():
             print(f"Health Data: {json.dumps(data, indent=2)}")
             assert resp.status == 200
             assert data["status"] == "healthy"
+            assert "provider" in data
 
-        # Test 2: Live email verification batch
+        # Test 2: Multi-stage email verification batch
         print("\n--- Testing POST /api/verify ---")
         payload = {
             "emails": [
-                "alex@gmail.com",
+                "support@github.com",
+                "test.user@mailinator.com",
                 "malformed..syntax@@domain",
-                "test@nonexistent-fake-domain-xyz987654321.org",
-                "alex@gmail.com"  # Duplicate
+                "service@nonexistent-fake-domain-xyz98741.invalid",
+                "support@github.com"  # Duplicate
             ],
             "smtp_check": False
         }
@@ -54,13 +58,19 @@ def run_test():
             for item in data.get("results", []):
                 email = item.get("email")
                 classification = item.get("classification")
+                is_disp = item.get("is_disposable")
                 reason = item.get("reason")
-                print(f"  * {email} -> [{classification}] : {reason}")
+                print(f"  * {email} -> [{classification}] (Disposable: {is_disp}) : {reason}")
 
             assert resp.status == 200
-            assert data["summary"]["likely_to_deliver"] == 2
-            assert data["summary"]["likely_to_bounce"] == 2
-            assert data["summary"]["total"] == 4
+            assert data.get("total") == 5
+            # mailinator should be flagged disposable
+            assert data["results"][1]["is_disposable"] is True
+            assert data["results"][1]["status_category"] == "risky"
+            # malformed should be invalid
+            assert data["results"][2]["status_category"] == "invalid"
+            # nonexistent should be invalid
+            assert data["results"][3]["status_category"] == "invalid"
 
         print("\n=== All live end-to-end tests PASSED successfully! ===")
 

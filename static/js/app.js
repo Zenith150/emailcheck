@@ -1,7 +1,7 @@
 /**
- * EmailCheck - Frontend Application Logic
- * Clean, modern, accessible DOM manipulation, validation, API requests,
- * table filtering, search, and CSV export.
+ * EmailCheck - Frontend Application Logic (v2.0)
+ * Handles multi-stage verification API requests, live search,
+ * status filtering (Valid, Invalid, Risky, Unknown), and RFC 4180 CSV export.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const verifyBtn = document.getElementById('verifyBtn');
   const clearBtn = document.getElementById('clearBtn');
   const loadSampleBtn = document.getElementById('loadSampleBtn');
-  const smtpCheckToggle = document.getElementById('smtpCheckToggle');
   const btnSpinner = document.getElementById('btnSpinner');
   const btnIcon = document.getElementById('btnIcon');
   const btnText = document.getElementById('btnText');
@@ -30,15 +29,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const summaryTotal = document.getElementById('summaryTotal');
   const summaryDelivered = document.getElementById('summaryDelivered');
   const summaryBounce = document.getElementById('summaryBounce');
+  const summaryRisky = document.getElementById('summaryRisky');
   const summaryUnknown = document.getElementById('summaryUnknown');
   const pctDelivered = document.getElementById('pctDelivered');
   const pctBounce = document.getElementById('pctBounce');
+  const pctRisky = document.getElementById('pctRisky');
   const pctUnknown = document.getElementById('pctUnknown');
 
   // Tab counters
   const tabCountAll = document.getElementById('tabCountAll');
   const tabCountDelivered = document.getElementById('tabCountDelivered');
   const tabCountBounce = document.getElementById('tabCountBounce');
+  const tabCountRisky = document.getElementById('tabCountRisky');
   const tabCountUnknown = document.getElementById('tabCountUnknown');
   const filterTabs = document.querySelectorAll('.tab-btn');
 
@@ -97,14 +99,15 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
 
-  // Load Sample Emails
+  // Load Diverse Sample Emails
   loadSampleBtn.addEventListener('click', () => {
     const samples = [
       'support@github.com',
       'contact@google.com',
-      'malformed.address..syntax@@example',
-      'service@nonexistent-domain-check-test.invalid',
-      'hello@cloudflare.com',
+      'test.user@mailinator.com',
+      'service@nonexistent-fake-domain-xyz98741.invalid',
+      'malformed..syntax@@domain',
+      'alex@example.com',
       'support@github.com' // Duplicate to demonstrate memoization
     ];
     emailsInput.value = samples.join('\n');
@@ -154,7 +157,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Set UI loading state
     setLoadingState(true);
 
     try {
@@ -165,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         body: JSON.stringify({
           emails: lines,
-          smtp_check: smtpCheckToggle ? smtpCheckToggle.checked : false
+          smtp_check: false
         })
       });
 
@@ -178,9 +180,8 @@ document.addEventListener('DOMContentLoaded', () => {
       currentResults = data.results || [];
       renderSummary(data.summary);
       renderResults();
-      showToast(`Successfully verified ${data.total} addresses.`, 'success');
+      showToast(`Successfully verified ${data.total} addresses via ${data.provider || 'pipeline'}.`, 'success');
 
-      // Scroll to summary smoothly
       summarySection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     } catch (err) {
@@ -219,23 +220,27 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsSection.style.display = 'block';
 
     const total = summary.total || 0;
-    const delivered = summary.likely_to_deliver || 0;
-    const bounce = summary.likely_to_bounce || 0;
+    const valid = summary.valid !== undefined ? summary.valid : (summary.likely_to_deliver || 0);
+    const invalid = summary.invalid !== undefined ? summary.invalid : (summary.likely_to_bounce || 0);
+    const risky = summary.risky || 0;
     const unknown = summary.unknown || 0;
 
     summaryTotal.textContent = total;
-    summaryDelivered.textContent = delivered;
-    summaryBounce.textContent = bounce;
+    summaryDelivered.textContent = valid;
+    summaryBounce.textContent = invalid;
+    if (summaryRisky) summaryRisky.textContent = risky;
     summaryUnknown.textContent = unknown;
 
-    pctDelivered.textContent = total > 0 ? `${Math.round((delivered / total) * 100)}% of total` : '0%';
-    pctBounce.textContent = total > 0 ? `${Math.round((bounce / total) * 100)}% of total` : '0%';
+    pctDelivered.textContent = total > 0 ? `${Math.round((valid / total) * 100)}% of total` : '0%';
+    pctBounce.textContent = total > 0 ? `${Math.round((invalid / total) * 100)}% of total` : '0%';
+    if (pctRisky) pctRisky.textContent = total > 0 ? `${Math.round((risky / total) * 100)}% of total` : '0%';
     pctUnknown.textContent = total > 0 ? `${Math.round((unknown / total) * 100)}% of total` : '0%';
 
     // Update tab counters
     tabCountAll.textContent = total;
-    tabCountDelivered.textContent = delivered;
-    tabCountBounce.textContent = bounce;
+    tabCountDelivered.textContent = valid;
+    tabCountBounce.textContent = invalid;
+    if (tabCountRisky) tabCountRisky.textContent = risky;
     tabCountUnknown.textContent = unknown;
   }
 
@@ -244,9 +249,28 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsTableBody.innerHTML = '';
 
     const filtered = currentResults.filter(item => {
-      const matchesFilter = currentFilter === 'all' || item.classification === currentFilter;
+      const cls = (item.classification || '').toLowerCase();
+      const cat = (item.status_category || '').toLowerCase();
+      const filter = currentFilter.toLowerCase();
+
+      let matchesFilter = false;
+      if (filter === 'all') {
+        matchesFilter = true;
+      } else if (filter === 'valid' || filter === 'likely to be delivered') {
+        matchesFilter = (cls === 'valid' || cls === 'likely to be delivered' || cat === 'valid');
+      } else if (filter === 'invalid' || filter === 'likely to bounce') {
+        matchesFilter = (cls === 'invalid' || cls === 'likely to bounce' || cat === 'invalid');
+      } else if (filter === 'risky') {
+        matchesFilter = (cls === 'risky' || cat === 'risky');
+      } else if (filter === 'unknown') {
+        matchesFilter = (cls === 'unknown' || cat === 'unknown');
+      }
+
       const q = currentSearch.toLowerCase();
-      const matchesSearch = !q || (item.email && item.email.toLowerCase().includes(q)) || (item.domain && item.domain.toLowerCase().includes(q));
+      const matchesSearch = !q ||
+        (item.email && item.email.toLowerCase().includes(q)) ||
+        (item.domain && item.domain.toLowerCase().includes(q));
+
       return matchesFilter && matchesSearch;
     });
 
@@ -263,12 +287,18 @@ document.addEventListener('DOMContentLoaded', () => {
       let badgeClass = 'badge-unknown';
       let badgeIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
 
-      if (item.classification === 'Likely to be Delivered') {
+      const cls = (item.classification || '').toLowerCase();
+      const cat = (item.status_category || '').toLowerCase();
+
+      if (cls === 'valid' || cls === 'likely to be delivered' || cat === 'valid') {
         badgeClass = 'badge-delivered';
         badgeIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`;
-      } else if (item.classification === 'Likely to Bounce') {
+      } else if (cls === 'invalid' || cls === 'likely to bounce' || cat === 'invalid') {
         badgeClass = 'badge-bounce';
         badgeIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+      } else if (cls === 'risky' || cat === 'risky') {
+        badgeClass = 'badge-risky';
+        badgeIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
       }
 
       // Syntax Pill
@@ -280,6 +310,8 @@ document.addEventListener('DOMContentLoaded', () => {
       let mxPill = `<span class="indicator-pill pill-untested">—</span>`;
       if (item.domain_status === 'nonexistent') {
         mxPill = `<span class="indicator-pill pill-fail" title="Domain does not exist in DNS">NXDOMAIN</span>`;
+      } else if (item.mx_status === 'null_mx') {
+        mxPill = `<span class="indicator-pill pill-fail" title="RFC 7505 Null MX (Does not accept email)">Null MX (0 .)</span>`;
       } else if (item.mx_status === 'mx_found') {
         mxPill = `<span class="indicator-pill pill-pass" title="${escapeHtml(item.mx_records ? item.mx_records.join(', ') : '')}">MX Found</span>`;
       } else if (item.mx_status === 'implicit_mx_found') {
@@ -292,11 +324,36 @@ document.addEventListener('DOMContentLoaded', () => {
         mxPill = `<span class="indicator-pill pill-untested">Untested</span>`;
       }
 
+      // Disposable Pill
+      let disposablePill = `<span class="indicator-pill pill-pass">Clean</span>`;
+      if (item.is_disposable) {
+        disposablePill = `<span class="indicator-pill pill-warning" title="Known temporary or disposable email domain">⚠ Disposable</span>`;
+      } else if (!item.syntax_valid) {
+        disposablePill = `<span class="indicator-pill pill-untested">—</span>`;
+      }
+
+      // Recipient / Provider Check Pill
+      let recipientPill = `<span class="indicator-pill pill-untested">Unverified</span>`;
+      const rec = (item.recipient_status || '').toLowerCase();
+      if (rec === 'deliverable') {
+        recipientPill = `<span class="indicator-pill pill-pass">✓ Deliverable</span>`;
+      } else if (rec === 'undeliverable') {
+        recipientPill = `<span class="indicator-pill pill-fail">✗ Undeliverable</span>`;
+      } else if (rec === 'risky') {
+        recipientPill = `<span class="indicator-pill pill-warning">⚠ Risky</span>`;
+      } else if (rec === 'unknown') {
+        recipientPill = `<span class="indicator-pill pill-untested">Inconclusive</span>`;
+      } else if (rec === 'unavailable') {
+        recipientPill = `<span class="indicator-pill pill-untested">No Provider</span>`;
+      }
+
       row.innerHTML = `
         <td style="color: var(--text-muted); font-size: 0.75rem;">${index + 1}</td>
         <td class="email-cell">${escapeHtml(item.email)}</td>
         <td>${syntaxPill}</td>
         <td>${mxPill}</td>
+        <td>${disposablePill}</td>
+        <td>${recipientPill}</td>
         <td>
           <span class="status-badge ${badgeClass}">
             ${badgeIcon}
@@ -331,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderResults();
   });
 
-  // CSV Export Utility (adhering to RFC 4180 standard)
+  // CSV Export Utility (RFC 4180 compliant)
   downloadCsvBtn.addEventListener('click', () => {
     if (!currentResults || currentResults.length === 0) {
       showToast('No results available to download.', 'error');
@@ -341,10 +398,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const headers = [
       'Email Address',
       'Classification',
+      'Status Category',
       'Syntax Valid',
       'Domain Status',
       'MX Status',
-      'SMTP Status',
+      'Is Disposable',
+      'Recipient Status',
+      'Provider',
       'Reason'
     ];
 
@@ -357,10 +417,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const rows = currentResults.map(item => [
       escapeCsvValue(item.email),
       escapeCsvValue(item.classification),
+      escapeCsvValue(item.status_category),
       escapeCsvValue(item.syntax_valid),
       escapeCsvValue(item.domain_status),
       escapeCsvValue(item.mx_status),
-      escapeCsvValue(item.smtp_status),
+      escapeCsvValue(item.is_disposable),
+      escapeCsvValue(item.recipient_status),
+      escapeCsvValue(item.provider_info ? item.provider_info.provider : 'none'),
       escapeCsvValue(item.reason)
     ].join(','));
 
@@ -380,6 +443,5 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast('CSV export downloaded successfully.', 'success');
   });
 
-  // Initialize line counter on load
   updateLineCounter();
 });

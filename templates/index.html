@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EmailCheck — Professional Email Verification & Diagnostics</title>
-  <meta name="description" content="Fast, transparent, non-invasive email verification. Classify email deliverability with syntax analysis, DNS MX routing, and safe SMTP checks.">
+  <title>EmailCheck — Multi-Stage Email Verification & Deliverability Diagnostics</title>
+  <meta name="description" content="Production-ready email verification over HTTPS (port 443). Classify email deliverability with RFC syntax, DNS resolution, MX records, disposable domain filtering, and provider-based inbox verification.">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,11 +27,11 @@
         </div>
         <div class="brand-text">
           <h1>EmailCheck</h1>
-          <span class="badge-tag">Deliverability Diagnostics</span>
+          <span class="badge-tag">HTTPS Verification Engine</span>
         </div>
       </div>
       <div class="header-actions">
-        <a href="#about" class="nav-link">How It Works</a>
+        <a href="#about" class="nav-link">Methodology</a>
         <a href="/health" target="_blank" class="nav-link status-pill">
           <span class="status-dot"></span> System Status
         </a>
@@ -53,20 +53,22 @@
           </svg>
         </div>
         <div class="notice-body">
-          <strong>Non-Invasive Verification Notice:</strong>
-          <span>EmailCheck performs non-invasive RFC syntax analysis and DNS/MX mail exchanger checks. Verification results represent <em>deliverability estimates rather than inbox guarantees</em>. No actual emails are ever sent.</span>
+          <strong>Non-Invasive Verification Pipeline:</strong>
+          <span>EmailCheck operates via secure HTTPS (Port 443) without depending on blocked outbound SMTP port 25 connections. Pipeline evaluates: <em>1. Syntax $\rightarrow$ 2. Normalization $\rightarrow$ 3. Disposable Domain Filter $\rightarrow$ 4. DNS Validation $\rightarrow$ 5. MX / Null MX Validation $\rightarrow$ 6. Provider Recipient Verification</em>. No actual emails are ever sent.</span>
         </div>
       </section>
 
-      <!-- Cloud Environment SMTP Status Notice -->
+      <!-- Cloud Environment & Provider Status Notice -->
       <div class="host-notice" id="hostNotice">
         <div class="host-notice-content">
-          <span class="host-status-indicator {% if smtp_available %}host-status-online{% else %}host-status-restricted{% endif %}"></span>
+          <span class="host-status-indicator {% if provider_configured %}host-status-online{% else %}host-status-info{% endif %}"></span>
           <span>
-            {% if smtp_available %}
-              <strong>Hosting Environment:</strong> Outbound SMTP (port 25) is accessible on this host. Optional deep recipient handshake is available.
+            <strong>Recipient Verification Provider:</strong>
+            <span class="provider-pill">{{ provider_name|capitalize }} Engine</span>
+            {% if provider_configured %}
+              — Active & connected over HTTPS. Recipient-level verification is enabled.
             {% else %}
-              <strong>Hosting Environment Notice:</strong> Standard outbound SMTP port 25 is restricted by this cloud hosting provider (typical on Render/cloud hosts for spam prevention). Full syntax validation, DNS resolution, and MX mail exchanger checks remain 100% operational.
+              — Running built-in engine (Syntax, Normalization, Disposable filter, DNS & MX routing). Configure <code>EMAIL_VERIFICATION_API_KEY</code> in Render to enable external live recipient-level checks.
             {% endif %}
           </span>
         </div>
@@ -77,7 +79,7 @@
         <div class="card-header">
           <div class="card-title-group">
             <h2 class="card-title">Verify Email Addresses</h2>
-            <p class="card-subtitle">Paste multiple email addresses below (one per line, up to {{ max_emails }} per batch).</p>
+            <p class="card-subtitle">Paste email addresses below (one per line, up to {{ max_emails }} per batch).</p>
           </div>
           <div class="input-stats">
             <span id="lineCountBadge" class="counter-badge">0 / {{ max_emails }} addresses</span>
@@ -90,7 +92,7 @@
               id="emailsInput"
               name="emails"
               rows="7"
-              placeholder="alex.smith@example.com&#10;sarah.johnson@company.org&#10;contact@active-mail-domain.com"
+              placeholder="alex.smith@example.com&#10;sarah.johnson@company.org&#10;test.user@mailinator.com&#10;service@nonexistent-domain.invalid"
               aria-label="Email list to verify"
               spellcheck="false"
               autocomplete="off"
@@ -98,16 +100,12 @@
           </div>
 
           <div class="form-options">
-            <label class="checkbox-label" title="Safely connect to recipient mail server without sending message body">
-              <input type="checkbox" id="smtpCheckToggle" {% if not smtp_available %}disabled{% endif %}>
-              <span class="checkbox-custom"></span>
-              <span class="checkbox-text">
-                Attempt Safe SMTP Handshake (Recipient Probe)
-                {% if not smtp_available %}
-                  <em class="disabled-hint">(Unavailable on this cloud host)</em>
-                {% endif %}
-              </span>
-            </label>
+            <div class="provider-badge-info">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              <span>HTTPS Recipient Verification (No Port 25 Required)</span>
+            </div>
 
             <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -117,7 +115,7 @@
                 <line x1="16" y1="17" x2="8" y2="17"/>
                 <polyline points="10 9 9 9 8 9"/>
               </svg>
-              Load Sample List
+              Load Diverse Sample List
             </button>
           </div>
 
@@ -143,7 +141,7 @@
         <!-- Progress Bar Indicator -->
         <div id="progressContainer" class="progress-bar-container" style="display: none;">
           <div class="progress-info">
-            <span id="progressText">Verifying DNS & mail exchangers...</span>
+            <span id="progressText">Executing verification pipeline...</span>
             <span class="progress-pulsar"></span>
           </div>
           <div class="progress-bar">
@@ -153,7 +151,7 @@
       </section>
 
       <!-- Summary Statistics Section -->
-      <section id="summarySection" class="summary-grid" style="display: none;" aria-label="Verification Summary">
+      <section id="summarySection" class="summary-grid summary-grid-5" style="display: none;" aria-label="Verification Summary">
         <div class="summary-card card-total">
           <div class="card-icon total-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -164,7 +162,7 @@
             </svg>
           </div>
           <div class="summary-meta">
-            <span class="summary-label">Total Addresses</span>
+            <span class="summary-label">Total Checked</span>
             <span id="summaryTotal" class="summary-value">0</span>
           </div>
         </div>
@@ -176,7 +174,7 @@
             </svg>
           </div>
           <div class="summary-meta">
-            <span class="summary-label">Likely to be Delivered</span>
+            <span class="summary-label">Valid / Deliverable</span>
             <span id="summaryDelivered" class="summary-value text-green">0</span>
             <span id="pctDelivered" class="summary-subtext">0%</span>
           </div>
@@ -190,9 +188,24 @@
             </svg>
           </div>
           <div class="summary-meta">
-            <span class="summary-label">Likely to Bounce</span>
+            <span class="summary-label">Invalid / Bounce</span>
             <span id="summaryBounce" class="summary-value text-red">0</span>
             <span id="pctBounce" class="summary-subtext">0%</span>
+          </div>
+        </div>
+
+        <div class="summary-card card-risky">
+          <div class="card-icon risky-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div class="summary-meta">
+            <span class="summary-label">Risky</span>
+            <span id="summaryRisky" class="summary-value text-amber">0</span>
+            <span id="pctRisky" class="summary-subtext">0%</span>
           </div>
         </div>
 
@@ -206,7 +219,7 @@
           </div>
           <div class="summary-meta">
             <span class="summary-label">Unknown</span>
-            <span id="summaryUnknown" class="summary-value text-amber">0</span>
+            <span id="summaryUnknown" class="summary-value text-slate">0</span>
             <span id="pctUnknown" class="summary-subtext">0%</span>
           </div>
         </div>
@@ -220,11 +233,14 @@
               <button type="button" class="tab-btn active" data-filter="all" role="tab" aria-selected="true">
                 All <span id="tabCountAll" class="tab-counter">0</span>
               </button>
-              <button type="button" class="tab-btn filter-delivered" data-filter="Likely to be Delivered" role="tab" aria-selected="false">
-                Delivered <span id="tabCountDelivered" class="tab-counter">0</span>
+              <button type="button" class="tab-btn filter-delivered" data-filter="Valid" role="tab" aria-selected="false">
+                Valid <span id="tabCountDelivered" class="tab-counter">0</span>
               </button>
-              <button type="button" class="tab-btn filter-bounce" data-filter="Likely to Bounce" role="tab" aria-selected="false">
-                Bounce <span id="tabCountBounce" class="tab-counter">0</span>
+              <button type="button" class="tab-btn filter-bounce" data-filter="Invalid" role="tab" aria-selected="false">
+                Invalid <span id="tabCountBounce" class="tab-counter">0</span>
+              </button>
+              <button type="button" class="tab-btn filter-risky" data-filter="Risky" role="tab" aria-selected="false">
+                Risky <span id="tabCountRisky" class="tab-counter">0</span>
               </button>
               <button type="button" class="tab-btn filter-unknown" data-filter="Unknown" role="tab" aria-selected="false">
                 Unknown <span id="tabCountUnknown" class="tab-counter">0</span>
@@ -236,7 +252,7 @@
                 <circle cx="11" cy="11" r="8"/>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              <input type="text" id="searchInput" placeholder="Filter emails..." aria-label="Filter results table">
+              <input type="text" id="searchInput" placeholder="Filter emails or domains..." aria-label="Filter results table">
             </div>
           </div>
 
@@ -257,11 +273,13 @@
           <table class="results-table" id="resultsTable">
             <thead>
               <tr>
-                <th scope="col" style="width: 50px;">#</th>
+                <th scope="col" style="width: 45px;">#</th>
                 <th scope="col">Email Address</th>
-                <th scope="col" style="width: 110px;">Syntax</th>
-                <th scope="col" style="width: 140px;">Domain / MX</th>
-                <th scope="col" style="width: 170px;">Classification</th>
+                <th scope="col" style="width: 95px;">Syntax</th>
+                <th scope="col" style="width: 130px;">Domain / MX</th>
+                <th scope="col" style="width: 105px;">Disposable</th>
+                <th scope="col" style="width: 130px;">Recipient Check</th>
+                <th scope="col" style="width: 135px;">Classification</th>
                 <th scope="col">Explanation & Diagnostics</th>
               </tr>
             </thead>
@@ -287,35 +305,41 @@
           </svg>
         </div>
         <h3>No Emails Verified Yet</h3>
-        <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to analyze syntax validity, DNS routing, and deliverability status.</p>
+        <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to inspect syntax, disposable domains, DNS mail routing, and HTTPS recipient inbox deliverability.</p>
       </section>
 
       <!-- Information & Methodology Section -->
       <section id="about" class="info-section">
-        <h2 class="info-title">How Email Verification Works</h2>
+        <h2 class="info-title">Reliable 7-Stage Verification Pipeline</h2>
         <div class="info-grid">
           <div class="info-card">
-            <div class="info-badge badge-green">1. Likely to be Delivered</div>
-            <p>The email has valid RFC 5322 syntax, points to a real domain with active MX mail exchangers, and passed non-invasive deliverability diagnostics.</p>
-            <small class="text-muted">Estimated deliverability. Inbox placement still depends on spam filters and recipient policy.</small>
+            <div class="info-badge badge-green">1. Valid / Deliverable</div>
+            <p>Email has valid RFC syntax, resolves to an active domain with usable MX records, is not a disposable provider, and recipient inbox was confirmed deliverable by verification provider.</p>
+            <small class="text-muted">High deliverability confidence. Inbox placement still subject to spam filters.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-red">2. Likely to Bounce</div>
-            <p>The address has malformed syntax, the domain does not exist in DNS (NXDOMAIN), lacks mail routing records, or an explicit rejection code was received.</p>
-            <small class="text-muted">Mail sent to these addresses will almost certainly fail or be rejected.</small>
+            <div class="info-badge badge-red">2. Invalid / Bounce</div>
+            <p>Malformed syntax, domain confirmed nonexistent (NXDOMAIN), domain publishes an RFC 7505 Null MX record, has no mail routing, or recipient was confirmed undeliverable.</p>
+            <small class="text-muted">Emails sent to this address will almost certainly bounce or be rejected.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-amber">3. Unknown</div>
-            <p>Verification is inconclusive due to DNS timeouts, greylisting, catch-all domain configurations, or cloud platform restrictions on outbound port 25.</p>
-            <small class="text-muted">Safe assessment: Never assumes a mailbox exists if the server hides or generalizes status.</small>
+            <div class="info-badge badge-amber">3. Risky</div>
+            <p>Domain is a temporary/disposable service, mail server is configured as catch-all (accepts any user), address is a generic role, or domain exists but recipient inbox is unverified.</p>
+            <small class="text-muted">Distinguishes domain routing from recipient inbox confirmation.</small>
+          </div>
+
+          <div class="info-card">
+            <div class="info-badge badge-slate">4. Unknown</div>
+            <p>DNS query timed out, nameserver failed, or provider API experienced rate limiting, quota exhaustion, or temporary timeout.</p>
+            <small class="text-muted">Transparent fallback: never guesses deliverability when diagnostics are inconclusive.</small>
           </div>
         </div>
 
         <div class="privacy-box">
-          <h4>🔒 Privacy & Safety Guarantee</h4>
-          <p>EmailCheck strictly adheres to non-invasive verification. We <strong>never send emails</strong>, never issue SMTP <code>DATA</code> commands, and do not store submitted email lists in permanent databases. All processing occurs in memory and user data is never retained.</p>
+          <h4>🔒 Port 25 Replacement & Privacy Architecture</h4>
+          <p>EmailCheck completely replaces direct SMTP port 25 probing with secure, cloud-friendly HTTPS APIs (port 443). We <strong>never send emails</strong>, never issue SMTP <code>DATA</code> commands, and do not store submitted email lists in permanent databases. All processing occurs in memory and user data is never retained.</p>
         </div>
       </section>
 
@@ -325,11 +349,13 @@
   <!-- Footer -->
   <footer class="app-footer">
     <div class="footer-container">
-      <p>&copy; 2026 EmailCheck — Built with Flask, dnspython, and clean standards.</p>
+      <p>&copy; 2026 EmailCheck — Built with Flask, dnspython, and HTTPS Verification Engine.</p>
       <div class="footer-links">
         <a href="/health" target="_blank">API Health</a>
         <span class="sep">•</span>
-        <a href="#about">Privacy & Methodology</a>
+        <a href="https://github.com/Zenith150/emailcheck" target="_blank">GitHub Repository</a>
+        <span class="sep">•</span>
+        <a href="#about">Methodology</a>
       </div>
     </div>
   </footer>

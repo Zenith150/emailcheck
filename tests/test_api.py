@@ -4,7 +4,7 @@ Tests REST API validation, responses, error handlers, and rate limiting.
 """
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import json
 
 from app import app, rate_limit_tracker
@@ -26,16 +26,19 @@ class TestEmailCheckAPI(unittest.TestCase):
         self.assertIn(b"Verify Emails", response.data)
 
     def test_get_health_endpoint(self):
-        """Health check endpoint should return healthy status."""
+        """Health check endpoint should return healthy status and provider info."""
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["service"], "EmailCheck")
+        self.assertIn("provider", data)
+        self.assertIn("provider_configured", data)
         self.assertIn("smtp_outbound_available", data)
 
+    @patch("verifier.get_verification_provider")
     @patch("verifier.check_domain_dns")
-    def test_api_verify_valid_batch(self, mock_dns):
+    def test_api_verify_valid_batch(self, mock_dns, mock_get_provider):
         """POST /api/verify with valid input list returns structured results."""
         mock_dns.return_value = {
             "domain": "example.com",
@@ -43,8 +46,25 @@ class TestEmailCheckAPI(unittest.TestCase):
             "mx_status": "mx_found",
             "mx_records": ["mail.example.com (priority 10)"],
             "primary_mx": "mail.example.com",
+            "is_null_mx": False,
             "error": None
         }
+
+        mock_provider = MagicMock()
+        mock_provider.name = "abstract"
+        mock_provider.verify_recipient.return_value = {
+            "status": "deliverable",
+            "is_deliverable": True,
+            "is_disposable": False,
+            "is_catch_all": False,
+            "is_role": False,
+            "score": 0.95,
+            "provider": "abstract",
+            "raw_status": "DELIVERABLE",
+            "reason": "Recipient inbox verified deliverable.",
+            "error": None
+        }
+        mock_get_provider.return_value = mock_provider
 
         payload = {
             "emails": [
@@ -69,12 +89,12 @@ class TestEmailCheckAPI(unittest.TestCase):
         self.assertEqual(data["summary"]["total"], 3)
         self.assertEqual(len(data["results"]), 3)
 
-        # First address should be delivered
-        self.assertEqual(data["results"][0]["classification"], "Likely to be Delivered")
-        # Second address should bounce (syntax invalid)
-        self.assertEqual(data["results"][1]["classification"], "Likely to Bounce")
+        # First address should be deliverable/valid
+        self.assertEqual(data["results"][0]["status_category"], "valid")
+        # Second address should bounce/invalid (syntax invalid)
+        self.assertEqual(data["results"][1]["status_category"], "invalid")
         # Third address (duplicate) should match first
-        self.assertEqual(data["results"][2]["classification"], "Likely to be Delivered")
+        self.assertEqual(data["results"][2]["status_category"], "valid")
 
     def test_api_verify_empty_emails_list(self):
         """Empty emails list should return 400 Bad Request."""

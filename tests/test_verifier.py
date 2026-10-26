@@ -1,6 +1,6 @@
 """
-Unit tests for EmailCheck verification engine (verifier.py).
-Mocks all external DNS and SMTP operations so test execution is fast,
+Unit tests for EmailCheck verification engine (verifier.py) and providers.py.
+Mocks all external DNS, SMTP, and HTTP operations so tests run fast,
 isolated, and independent of external networks.
 """
 
@@ -8,16 +8,26 @@ import unittest
 from unittest.mock import patch, MagicMock
 import socket
 import smtplib
+import urllib.error
 import dns.resolver
 import dns.exception
 
 from verifier import (
     validate_syntax,
+    normalize_email,
     check_domain_dns,
     check_smtp_recipient,
     classify_result,
     verify_single_email,
     verify_email_list
+)
+from providers import (
+    is_disposable_domain,
+    LocalFallbackProvider,
+    AbstractAPIProvider,
+    HunterProvider,
+    ZeroBounceProvider,
+    get_verification_provider
 )
 
 
@@ -61,6 +71,51 @@ class TestEmailSyntaxValidation(unittest.TestCase):
             self.assertIsNotNone(err)
 
 
+class TestEmailNormalization(unittest.TestCase):
+    """Test email normalization without modifying local-part casing."""
+
+    def test_normalization_rules(self):
+        cases = [
+            ("  John.Doe@EXAMPLE.COM.  ", "John.Doe", "example.com", "John.Doe@example.com"),
+            ("User+Tag@Sub.Domain.Org", "User+Tag", "sub.domain.org", "User+Tag@sub.domain.org"),
+            ("plain", "plain", "", "plain")
+        ]
+        for raw, expected_local, expected_dom, expected_full in cases:
+            loc, dom, full = normalize_email(raw)
+            self.assertEqual(loc, expected_local)
+            self.assertEqual(dom, expected_dom)
+            self.assertEqual(full, expected_full)
+
+
+class TestDisposableDomainDetection(unittest.TestCase):
+    """Test identification of temporary and disposable email domains."""
+
+    def test_known_disposable_domains(self):
+        disposable_list = [
+            "mailinator.com",
+            "sharklasers.com",
+            "guerrillamail.com",
+            "10minutemail.com",
+            "tempmail.com",
+            "yopmail.com",
+            "burnermail.io"
+        ]
+        for d in disposable_list:
+            self.assertTrue(is_disposable_domain(d), f"Expected {d} to be disposable")
+
+    def test_legitimate_domains_are_not_disposable(self):
+        legit_list = [
+            "gmail.com",
+            "google.com",
+            "github.com",
+            "microsoft.com",
+            "yahoo.com",
+            "company.co.uk"
+        ]
+        for d in legit_list:
+            self.assertFalse(is_disposable_domain(d), f"Expected {d} NOT to be disposable")
+
+
 class TestDomainDNSVerification(unittest.TestCase):
     """Test DNS and MX record resolution with mocked dnspython."""
 
@@ -82,6 +137,21 @@ class TestDomainDNSVerification(unittest.TestCase):
         self.assertEqual(result["mx_status"], "mx_found")
         self.assertEqual(result["primary_mx"], "mail.example.com")
         self.assertEqual(len(result["mx_records"]), 2)
+        self.assertFalse(result["is_null_mx"])
+
+    def test_rfc7505_null_mx_record(self):
+        # RFC 7505 Null MX: preference 0, exchange '.'
+        mock_null_mx = MagicMock()
+        mock_null_mx.preference = 0
+        mock_null_mx.exchange = "."
+
+        self.mock_resolver.resolve.return_value = [mock_null_mx]
+
+        result = check_domain_dns("nomail.example", resolver=self.mock_resolver)
+        self.assertEqual(result["domain_status"], "exists")
+        self.assertEqual(result["mx_status"], "null_mx")
+        self.assertTrue(result["is_null_mx"])
+        self.assertIn("Null MX", result["error"])
 
     def test_domain_nxdomain(self):
         self.mock_resolver.resolve.side_effect = dns.resolver.NXDOMAIN()
@@ -92,7 +162,6 @@ class TestDomainDNSVerification(unittest.TestCase):
         self.assertIn("NXDOMAIN", result["error"])
 
     def test_rfc5321_implicit_mx_fallback_a_record(self):
-        # MX raises NoAnswer, but A record succeeds
         def resolve_side_effect(qname, rdtype):
             if rdtype == "MX":
                 raise dns.resolver.NoAnswer()
@@ -111,7 +180,6 @@ class TestDomainDNSVerification(unittest.TestCase):
         self.assertIn("Implicit MX via A record", result["mx_records"][0])
 
     def test_domain_without_mx_and_without_a_record(self):
-        # Both MX and A/AAAA raise NoAnswer
         self.mock_resolver.resolve.side_effect = dns.resolver.NoAnswer()
 
         result = check_domain_dns("no-mail.org", resolver=self.mock_resolver)
@@ -128,177 +196,241 @@ class TestDomainDNSVerification(unittest.TestCase):
         self.assertIn("timed out", result["error"])
 
 
-class TestSMTPVerification(unittest.TestCase):
-    """Test safe SMTP verification with mocked smtplib."""
+class TestProviderIntegration(unittest.TestCase):
+    """Test HTTPS verification providers (Abstract, Hunter, ZeroBounce, Local)."""
 
-    @patch("verifier.smtplib.SMTP")
-    def test_smtp_mailbox_accepted(self, mock_smtp_class):
-        mock_client = MagicMock()
-        mock_smtp_class.return_value = mock_client
+    @patch("urllib.request.urlopen")
+    def test_abstract_api_deliverable(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "email": "alex@company.com",
+            "deliverability": "DELIVERABLE",
+            "quality_score": 0.95,
+            "is_disposable_email": {"value": false},
+            "is_catchall_email": {"value": false},
+            "is_smtp_valid": {"value": true}
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
 
-        mock_client.connect.return_value = (220, b"mx.example.com ESMTP ready")
-        mock_client.mail.return_value = (250, b"Sender OK")
-        # Primary recipient returns 250, probe recipient returns 550 (not catch-all)
-        mock_client.rcpt.side_effect = [
-            (250, b"Recipient OK"),
-            (550, b"User unknown (catch-all probe)")
-        ]
+        provider = AbstractAPIProvider(api_key="test_api_key")
+        result = provider.verify_recipient("alex@company.com")
 
-        result = check_smtp_recipient("valid.user@example.com", "mx.example.com")
-        self.assertEqual(result["smtp_status"], "mailbox_accepted")
-        self.assertFalse(result["is_catch_all"])
-        self.assertEqual(result["code"], 250)
+        self.assertEqual(result["status"], "deliverable")
+        self.assertTrue(result["is_deliverable"])
+        self.assertFalse(result["is_disposable"])
+        self.assertEqual(result["provider"], "abstract")
 
-    @patch("verifier.smtplib.SMTP")
-    def test_smtp_catch_all_detected(self, mock_smtp_class):
-        mock_client = MagicMock()
-        mock_smtp_class.return_value = mock_client
+    @patch("urllib.request.urlopen")
+    def test_abstract_api_undeliverable(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "email": "baduser@company.com",
+            "deliverability": "UNDELIVERABLE",
+            "quality_score": 0.10,
+            "is_disposable_email": {"value": false},
+            "is_catchall_email": {"value": false},
+            "is_smtp_valid": {"value": false}
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
 
-        mock_client.connect.return_value = (220, b"mx.example.com ESMTP ready")
-        mock_client.mail.return_value = (250, b"Sender OK")
-        # Both primary recipient AND nonexistent probe recipient return 250
-        mock_client.rcpt.side_effect = [
-            (250, b"Recipient OK"),
-            (250, b"Recipient OK (catch-all accepted)")
-        ]
+        provider = AbstractAPIProvider(api_key="test_api_key")
+        result = provider.verify_recipient("baduser@company.com")
 
-        result = check_smtp_recipient("any.user@catchall.com", "mx.catchall.com")
-        self.assertEqual(result["smtp_status"], "catch_all")
+        self.assertEqual(result["status"], "undeliverable")
+        self.assertFalse(result["is_deliverable"])
+
+    @patch("urllib.request.urlopen")
+    def test_abstract_api_quota_exceeded(self, mock_urlopen):
+        http_err = urllib.error.HTTPError(
+            url="https://api.abstractapi.com",
+            code=429,
+            msg="Too Many Requests",
+            hdrs={},
+            fp=None
+        )
+        mock_urlopen.side_effect = http_err
+
+        provider = AbstractAPIProvider(api_key="test_api_key")
+        result = provider.verify_recipient("user@company.com")
+
+        self.assertEqual(result["status"], "unknown")
+        self.assertIn("quota", result["reason"].lower())
+
+    @patch("urllib.request.urlopen")
+    def test_hunter_api_deliverable(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "data": {
+                "result": "deliverable",
+                "status": "valid",
+                "score": 90,
+                "disposable": false,
+                "accept_all": false
+            }
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        provider = HunterProvider(api_key="test_hunter_key")
+        result = provider.verify_recipient("alex@huntertest.com")
+
+        self.assertEqual(result["status"], "deliverable")
+        self.assertTrue(result["is_deliverable"])
+        self.assertEqual(result["provider"], "hunter")
+
+    @patch("urllib.request.urlopen")
+    def test_zerobounce_api_catch_all(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'''{
+            "address": "sales@catchall.com",
+            "status": "catch-all",
+            "sub_status": ""
+        }'''
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        provider = ZeroBounceProvider(api_key="test_zb_key")
+        result = provider.verify_recipient("sales@catchall.com")
+
+        self.assertEqual(result["status"], "risky")
         self.assertTrue(result["is_catch_all"])
 
-    @patch("verifier.smtplib.SMTP")
-    def test_smtp_permanent_rejection(self, mock_smtp_class):
-        mock_client = MagicMock()
-        mock_smtp_class.return_value = mock_client
+    def test_local_fallback_provider_without_key(self):
+        provider = LocalFallbackProvider()
+        res_regular = provider.verify_recipient("user@example.com")
+        self.assertEqual(res_regular["status"], "unavailable")
 
-        mock_client.connect.return_value = (220, b"mx.example.com ESMTP ready")
-        mock_client.mail.return_value = (250, b"Sender OK")
-        mock_client.rcpt.return_value = (550, b"5.1.1 User unknown")
-
-        result = check_smtp_recipient("baduser@example.com", "mx.example.com")
-        self.assertEqual(result["smtp_status"], "mailbox_rejected")
-        self.assertEqual(result["code"], 550)
-        self.assertIn("rejected", result["reason"])
-
-    @patch("verifier.smtplib.SMTP")
-    def test_smtp_temporary_failure_greylisting(self, mock_smtp_class):
-        mock_client = MagicMock()
-        mock_smtp_class.return_value = mock_client
-
-        mock_client.connect.return_value = (220, b"mx.example.com ESMTP ready")
-        mock_client.mail.return_value = (250, b"Sender OK")
-        mock_client.rcpt.return_value = (451, b"4.7.1 Greylisted, please try again later")
-
-        result = check_smtp_recipient("greylisted@example.com", "mx.example.com")
-        self.assertEqual(result["smtp_status"], "temporary_failure")
-        self.assertEqual(result["code"], 451)
-
-    @patch("verifier.smtplib.SMTP")
-    def test_smtp_connection_blocked_or_refused(self, mock_smtp_class):
-        mock_client = MagicMock()
-        mock_smtp_class.return_value = mock_client
-        mock_client.connect.side_effect = ConnectionRefusedError("Connection refused on port 25")
-
-        result = check_smtp_recipient("user@blocked-host.com", "mx.blocked-host.com")
-        self.assertEqual(result["smtp_status"], "connection_failed")
-        self.assertIn("blocked", result["reason"].lower())
-
-    @patch("verifier.smtplib.SMTP")
-    def test_smtp_timeout(self, mock_smtp_class):
-        mock_client = MagicMock()
-        mock_smtp_class.return_value = mock_client
-        mock_client.connect.side_effect = socket.timeout("Timed out")
-
-        result = check_smtp_recipient("user@timeout-host.com", "mx.timeout-host.com")
-        self.assertEqual(result["smtp_status"], "timeout")
-        self.assertIn("timed out", result["reason"].lower())
+        res_disposable = provider.verify_recipient("user@mailinator.com")
+        self.assertEqual(res_disposable["status"], "risky")
+        self.assertTrue(res_disposable["is_disposable"])
 
 
 class TestClassificationLogic(unittest.TestCase):
-    """Test classification into Likely to be Delivered, Likely to Bounce, and Unknown."""
+    """Test 7-stage classification rules into Valid, Invalid, Risky, and Unknown."""
 
     def test_syntax_invalid_classification(self):
-        cls, reason = classify_result(
+        cls, cat, reason = classify_result(
             syntax_valid=False,
             domain_status="untested",
             mx_status="untested",
-            smtp_info=None,
+            is_disposable=False,
             syntax_error="Missing @"
         )
-        self.assertEqual(cls, "Likely to Bounce")
+        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cat, "invalid")
         self.assertIn("Invalid email syntax", reason)
 
     def test_nxdomain_classification(self):
-        cls, reason = classify_result(
+        cls, cat, reason = classify_result(
             syntax_valid=True,
             domain_status="nonexistent",
             mx_status="none",
-            smtp_info=None
+            is_disposable=False
         )
-        self.assertEqual(cls, "Likely to Bounce")
+        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cat, "invalid")
         self.assertIn("NXDOMAIN", reason)
 
+    def test_rfc7505_null_mx_classification(self):
+        cls, cat, reason = classify_result(
+            syntax_valid=True,
+            domain_status="exists",
+            mx_status="null_mx",
+            is_disposable=False
+        )
+        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cat, "invalid")
+        self.assertIn("Null MX", reason)
+
     def test_no_mx_classification(self):
-        cls, reason = classify_result(
+        cls, cat, reason = classify_result(
             syntax_valid=True,
             domain_status="exists",
             mx_status="no_records",
-            smtp_info=None
+            is_disposable=False
         )
-        self.assertEqual(cls, "Likely to Bounce")
+        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cat, "invalid")
         self.assertIn("no MX or A records", reason)
 
     def test_dns_timeout_classification(self):
-        cls, reason = classify_result(
+        cls, cat, reason = classify_result(
             syntax_valid=True,
             domain_status="dns_timeout",
             mx_status="dns_timeout",
-            smtp_info=None,
+            is_disposable=False,
             domain_error="DNS resolution timed out"
         )
         self.assertEqual(cls, "Unknown")
+        self.assertEqual(cat, "unknown")
         self.assertIn("could not be completed", reason)
 
-    def test_standard_mx_found_classification(self):
-        cls, reason = classify_result(
+    def test_disposable_domain_classification(self):
+        cls, cat, reason = classify_result(
             syntax_valid=True,
             domain_status="exists",
             mx_status="mx_found",
-            smtp_info=None
+            is_disposable=True
         )
-        self.assertEqual(cls, "Likely to be Delivered")
-        self.assertIn("active MX mail routing verified", reason)
+        self.assertEqual(cls, "Risky")
+        self.assertEqual(cat, "risky")
+        self.assertIn("disposable", reason.lower())
 
-    def test_smtp_rejected_classification(self):
-        smtp_info = {
-            "smtp_attempted": True,
-            "smtp_status": "mailbox_rejected",
-            "reason": "Mailbox not found (550)"
+    def test_provider_deliverable_classification(self):
+        provider_res = {
+            "status": "deliverable",
+            "is_deliverable": True,
+            "is_disposable": False,
+            "reason": "Inbox exists"
         }
-        cls, reason = classify_result(
+        cls, cat, reason = classify_result(
             syntax_valid=True,
             domain_status="exists",
             mx_status="mx_found",
-            smtp_info=smtp_info
+            is_disposable=False,
+            provider_res=provider_res
         )
-        self.assertEqual(cls, "Likely to Bounce")
-        self.assertIn("explicitly rejected mailbox", reason)
+        self.assertEqual(cls, "Valid")
+        self.assertEqual(cat, "valid")
+        self.assertIn("confirmed deliverable", reason)
 
-    def test_smtp_catch_all_classification(self):
-        smtp_info = {
-            "smtp_attempted": True,
-            "smtp_status": "catch_all",
-            "is_catch_all": True,
-            "reason": "Catch-all domain"
+    def test_provider_undeliverable_classification(self):
+        provider_res = {
+            "status": "undeliverable",
+            "is_deliverable": False,
+            "is_disposable": False,
+            "reason": "Mailbox does not exist"
         }
-        cls, reason = classify_result(
+        cls, cat, reason = classify_result(
             syntax_valid=True,
             domain_status="exists",
             mx_status="mx_found",
-            smtp_info=smtp_info
+            is_disposable=False,
+            provider_res=provider_res
         )
-        self.assertEqual(cls, "Unknown")
-        self.assertIn("catch-all", reason.lower())
+        self.assertEqual(cls, "Invalid")
+        self.assertEqual(cat, "invalid")
+        self.assertIn("undeliverable", reason)
+
+    def test_provider_unavailable_unverified_recipient(self):
+        provider_res = {
+            "status": "unavailable",
+            "is_deliverable": None,
+            "is_disposable": False,
+            "reason": "No provider configured"
+        }
+        cls, cat, reason = classify_result(
+            syntax_valid=True,
+            domain_status="exists",
+            mx_status="mx_found",
+            is_disposable=False,
+            provider_res=provider_res
+        )
+        self.assertEqual(cls, "Risky")
+        self.assertEqual(cat, "risky")
+        self.assertIn("unverified", reason.lower())
 
 
 class TestBatchVerificationAndDeduplication(unittest.TestCase):
@@ -312,22 +444,37 @@ class TestBatchVerificationAndDeduplication(unittest.TestCase):
             "mx_status": "mx_found",
             "mx_records": ["mail.example.com (priority 10)"],
             "primary_mx": "mail.example.com",
+            "is_null_mx": False,
             "error": None
         }
 
-        # 3 identical emails in input
+        mock_provider = MagicMock()
+        mock_provider.name = "mock"
+        mock_provider.verify_recipient.return_value = {
+            "status": "deliverable",
+            "is_deliverable": True,
+            "is_disposable": False,
+            "is_catch_all": False,
+            "is_role": False,
+            "score": 0.99,
+            "provider": "mock",
+            "raw_status": "ok",
+            "reason": "Inbox active",
+            "error": None
+        }
+
         emails = ["test@example.com", "Test@Example.com", "test@example.com"]
-        result = verify_email_list(emails, perform_smtp=False)
+        result = verify_email_list(emails, provider=mock_provider)
 
         self.assertTrue(result["success"])
         self.assertEqual(result["total"], 3)
         self.assertEqual(len(result["results"]), 3)
-        # Check that DNS check was only called ONCE thanks to memoization!
+        self.assertEqual(result["summary"]["valid"], 3)
         self.assertEqual(mock_dns.call_count, 1)
 
     def test_empty_email_list_raises_error(self):
         with self.assertRaises(ValueError):
-            verify_email_list([], perform_smtp=False)
+            verify_email_list([])
 
     def test_exceeding_max_limit_raises_error(self):
         oversized = [f"user{i}@example.com" for i in range(105)]

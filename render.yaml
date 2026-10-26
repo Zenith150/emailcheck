@@ -9,6 +9,14 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: EMAIL_VERIFICATION_PROVIDER
+        value: abstract
+      - key: EMAIL_VERIFICATION_API_KEY
+        sync: false
+      - key: EMAIL_VERIFICATION_TIMEOUT
+        value: 6.0
+      - key: ENABLE_DIRECT_SMTP
+        value: false
       - key: MAX_EMAILS_PER_REQUEST
         value: 100
       - key: RATE_LIMIT_REQUESTS

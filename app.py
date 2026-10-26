@@ -1,6 +1,7 @@
 """
-EmailCheck - Flask Web Application
-Provides responsive UI, REST API (/api/verify), and health monitoring (/health).
+EmailCheck - Flask Web Application (v2.0)
+Provides responsive dashboard UI, REST API (/api/verify), and health monitoring (/health)
+with HTTPS verification provider support, disposable email detection, and RFC 7505 Null MX handling.
 """
 
 import os
@@ -10,8 +11,9 @@ from collections import defaultdict
 from flask import Flask, render_template, request, jsonify
 
 from verifier import verify_email_list, test_smtp_outbound_capability
+from providers import get_verification_provider
 
-# Configure logging (Privacy-first: do NOT log full email addresses)
+# Configure logging (Privacy-first: do NOT log full email addresses or API keys)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -25,10 +27,10 @@ MAX_EMAILS_PER_REQUEST = int(os.environ.get("MAX_EMAILS_PER_REQUEST", 100))
 RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", 30))  # Max requests per window
 RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW", 60))
 
-# Simple in-memory rate limiter per IP address
+# Simple in-memory sliding window rate limiter per IP address
 rate_limit_tracker = defaultdict(list)
 
-# Check outbound SMTP capability at startup (cached)
+# Check outbound SMTP capability at startup (cached, for informational purposes only)
 _smtp_capability_cache = None
 
 
@@ -36,8 +38,8 @@ def check_cached_smtp_capability() -> bool:
     global _smtp_capability_cache
     if _smtp_capability_cache is None:
         try:
-            _smtp_capability_cache = test_smtp_outbound_capability(timeout=2.0)
-            logger.info("Outbound SMTP capability detected: %s", _smtp_capability_cache)
+            # Short non-blocking socket test
+            _smtp_capability_cache = test_smtp_outbound_capability(timeout=1.5)
         except Exception:
             _smtp_capability_cache = False
     return _smtp_capability_cache
@@ -47,7 +49,6 @@ def is_rate_limited(client_ip: str) -> bool:
     """Basic sliding-window rate limiter per client IP."""
     now = time.time()
     history = rate_limit_tracker[client_ip]
-    # Filter out timestamps older than the window
     valid_history = [t for t in history if now - t < RATE_LIMIT_WINDOW_SECONDS]
     rate_limit_tracker[client_ip] = valid_history
 
@@ -62,21 +63,31 @@ def is_rate_limited(client_ip: str) -> bool:
 def index():
     """Serves the main application single-page dashboard."""
     smtp_available = check_cached_smtp_capability()
+    provider = get_verification_provider()
+    has_api_key = bool(os.environ.get("EMAIL_VERIFICATION_API_KEY", "").strip())
+    
     return render_template(
         "index.html",
         smtp_available=smtp_available,
+        provider_name=provider.name,
+        provider_configured=has_api_key,
         max_emails=MAX_EMAILS_PER_REQUEST
     )
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Deployment health check endpoint."""
+    """Deployment health check endpoint reporting system status and verification pipeline."""
     smtp_available = check_cached_smtp_capability()
+    provider = get_verification_provider()
+    has_api_key = bool(os.environ.get("EMAIL_VERIFICATION_API_KEY", "").strip())
+    
     return jsonify({
         "status": "healthy",
         "service": "EmailCheck",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "provider": provider.name,
+        "provider_configured": has_api_key,
         "smtp_outbound_available": smtp_available,
         "max_emails_per_request": MAX_EMAILS_PER_REQUEST
     }), 200
@@ -95,6 +106,7 @@ def api_verify():
     {
         "success": true,
         "total": 2,
+        "provider": "abstract",
         "summary": {...},
         "results": [...]
     }
@@ -177,7 +189,15 @@ def api_verify():
 def not_found(e):
     if request.path.startswith("/api/"):
         return jsonify({"success": False, "error": "Endpoint not found."}), 404
-    return render_template("index.html", smtp_available=check_cached_smtp_capability(), max_emails=MAX_EMAILS_PER_REQUEST), 404
+    provider = get_verification_provider()
+    has_api_key = bool(os.environ.get("EMAIL_VERIFICATION_API_KEY", "").strip())
+    return render_template(
+        "index.html",
+        smtp_available=check_cached_smtp_capability(),
+        provider_name=provider.name,
+        provider_configured=has_api_key,
+        max_emails=MAX_EMAILS_PER_REQUEST
+    ), 404
 
 
 @app.errorhandler(405)
