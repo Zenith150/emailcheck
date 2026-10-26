@@ -16,7 +16,7 @@ services:
       - key: EMAIL_VERIFICATION_TIMEOUT
         value: 6.0
       - key: ENABLE_SMTP_PROBE
-        value: false
+        value: true
       - key: SMTP_PROBE_PORT
         value: 25
       - key: SMTP_PROBE_TIMEOUT

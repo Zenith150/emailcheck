@@ -4,6 +4,7 @@ Mocks all external DNS, SMTP, and HTTP operations so tests run fast,
 isolated, and independent of external networks.
 """
 
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 import socket
@@ -595,6 +596,70 @@ class TestDomainDiagnosticsAndPipeline(unittest.TestCase):
         self.assertIn("smtp_status", res["smtp_probe"])
         self.assertIn("smtp_attempted", res["smtp_probe"])
         self.assertIn("smtp_explanation", res["smtp_probe"])
+
+    @patch.dict(os.environ, {"ENABLE_SMTP_PROBE": "false"})
+    @patch("verifier.check_domain_dns")
+    def test_verify_single_email_perform_smtp_when_server_disabled(self, mock_dns):
+        """When user checks SMTP box but server has ENABLE_SMTP_PROBE=false, report disabled with explanation."""
+        mock_dns.return_value = {
+            "domain": "example.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.example.com"],
+            "primary_mx": "mail.example.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        res = verify_single_email("user@example.com", perform_smtp=True)
+        self.assertEqual(res["smtp_probe"]["smtp_status"], "disabled")
+        self.assertFalse(res["smtp_probe"]["smtp_attempted"])
+        self.assertIn("ENABLE_SMTP_PROBE=false", res["smtp_probe"]["smtp_explanation"])
+
+    @patch.dict(os.environ, {"ENABLE_SMTP_PROBE": "true"})
+    @patch("verifier.probe_smtp_recipient")
+    @patch("verifier.check_domain_dns")
+    def test_verify_single_email_perform_smtp_when_server_enabled(self, mock_dns, mock_probe):
+        """When user checks SMTP box and server allows probing, probe is invoked."""
+        mock_dns.return_value = {
+            "domain": "example.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.example.com"],
+            "primary_mx": "mail.example.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        mock_probe.return_value = {
+            "smtp_status": "unavailable",
+            "smtp_attempted": True,
+            "smtp_response_code": None,
+            "smtp_response_message": None,
+            "smtp_server": "mail.example.com",
+            "smtp_duration_ms": 5000.0,
+            "smtp_explanation": "Connection timed out on port 25."
+        }
+        res = verify_single_email("user@example.com", perform_smtp=True)
+        mock_probe.assert_called_once()
+        self.assertEqual(res["smtp_probe"]["smtp_status"], "unavailable")
+
+    @patch.dict(os.environ, {"ENABLE_SMTP_PROBE": "true"})
+    @patch("verifier.probe_smtp_recipient")
+    @patch("verifier.check_domain_dns")
+    def test_verify_single_email_opt_in_skipped_when_perform_smtp_false(self, mock_dns, mock_probe):
+        """When server allows probing but user did NOT check box, probe is skipped (opt-in)."""
+        mock_dns.return_value = {
+            "domain": "example.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.example.com"],
+            "primary_mx": "mail.example.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        res = verify_single_email("user@example.com", perform_smtp=False)
+        mock_probe.assert_not_called()
+        self.assertEqual(res["smtp_probe"]["smtp_status"], "skipped")
+        self.assertIn("opt-in", res["smtp_probe"]["smtp_explanation"])
 
 
 if __name__ == "__main__":

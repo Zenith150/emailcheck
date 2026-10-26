@@ -492,9 +492,11 @@ def classify_result(
                     "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). "
                     "Note: Confirms address acceptance during SMTP transaction; downstream inbox placement is not guaranteed."
                 )
+            if smtp_info and smtp_info.get("smtp_status") in ("rejected", "mailbox_rejected"):
+                return "Invalid", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_info.get('smtp_explanation')}."
             # Provider is unconfigured (Local engine): domain is valid, but recipient inbox is unverified
             return "Risky", "risky", (
-                "Domain mail routing is active (MX verified). Recipient-level verification is unverified because no provider API key is configured. "
+                "Domain mail routing is active (MX verified). Recipient-level verification is unavailable (unverified) because no provider API key is configured. "
                 "Note: A valid domain does not guarantee individual recipient inbox existence."
             )
 
@@ -555,7 +557,7 @@ def verify_single_email(
         )
         duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
         default_smtp = {
-            "smtp_status": "disabled" if not is_smtp_probe_enabled() and not perform_smtp else "skipped",
+            "smtp_status": "disabled" if not is_smtp_probe_enabled() else "skipped",
             "smtp_attempted": False,
             "smtp_response_code": None,
             "smtp_response_message": None,
@@ -602,25 +604,85 @@ def verify_single_email(
     primary_mx = dns_result.get("primary_mx")
     dns_err = dns_result.get("error")
 
-    # SMTP probe result
-    smtp_probe_res = {
-        "smtp_status": "disabled" if not is_smtp_probe_enabled() and not perform_smtp else "skipped",
-        "smtp_attempted": False,
-        "smtp_response_code": None,
-        "smtp_response_message": None,
-        "smtp_server": primary_mx,
-        "smtp_duration_ms": 0.0,
-        "smtp_explanation": "SMTP recipient probing is disabled."
-    }
+    # SMTP probe result determination
+    server_smtp_enabled = is_smtp_probe_enabled()
+
+    if perform_smtp:
+        if server_smtp_enabled:
+            # Opt-in requested AND server configuration allows probing
+            if domain_status == "exists" and mx_status in ("mx_found", "implicit_mx_found") and primary_mx:
+                smtp_probe_res = probe_smtp_recipient(normalized_email, primary_mx)
+            elif mx_status == "null_mx":
+                smtp_probe_res = {
+                    "smtp_status": "rejected",
+                    "smtp_attempted": False,
+                    "smtp_response_code": None,
+                    "smtp_response_message": None,
+                    "smtp_server": primary_mx,
+                    "smtp_duration_ms": 0.0,
+                    "smtp_explanation": "SMTP probe skipped: Domain publishes RFC 7505 Null MX record ('0 .')."
+                }
+            elif domain_status == "nonexistent":
+                smtp_probe_res = {
+                    "smtp_status": "unavailable",
+                    "smtp_attempted": False,
+                    "smtp_response_code": None,
+                    "smtp_response_message": None,
+                    "smtp_server": None,
+                    "smtp_duration_ms": 0.0,
+                    "smtp_explanation": "SMTP probe skipped: Domain does not exist in DNS (NXDOMAIN)."
+                }
+            else:
+                smtp_probe_res = {
+                    "smtp_status": "unavailable",
+                    "smtp_attempted": False,
+                    "smtp_response_code": None,
+                    "smtp_response_message": None,
+                    "smtp_server": primary_mx,
+                    "smtp_duration_ms": 0.0,
+                    "smtp_explanation": "SMTP probe skipped: No valid MX host available for domain."
+                }
+        else:
+            # Opt-in requested, BUT server configuration disables probing
+            smtp_probe_res = {
+                "smtp_status": "disabled",
+                "smtp_attempted": False,
+                "smtp_response_code": None,
+                "smtp_response_message": None,
+                "smtp_server": primary_mx,
+                "smtp_duration_ms": 0.0,
+                "smtp_explanation": (
+                    "SMTP recipient probing was requested, but is disabled by server configuration "
+                    "(ENABLE_SMTP_PROBE=false). To test direct SMTP on port 25, configure ENABLE_SMTP_PROBE=true "
+                    "in the Render Dashboard environment settings."
+                )
+            }
+    else:
+        # User did not opt-in to SMTP probing
+        if server_smtp_enabled:
+            smtp_probe_res = {
+                "smtp_status": "skipped",
+                "smtp_attempted": False,
+                "smtp_response_code": None,
+                "smtp_response_message": None,
+                "smtp_server": primary_mx,
+                "smtp_duration_ms": 0.0,
+                "smtp_explanation": "SMTP recipient probe skipped (opt-in checkbox was not selected)."
+            }
+        else:
+            smtp_probe_res = {
+                "smtp_status": "disabled",
+                "smtp_attempted": False,
+                "smtp_response_code": None,
+                "smtp_response_message": None,
+                "smtp_server": primary_mx,
+                "smtp_duration_ms": 0.0,
+                "smtp_explanation": "SMTP recipient probing is disabled by server configuration (ENABLE_SMTP_PROBE=false)."
+            }
 
     provider_res = None
 
     if domain_status == "exists" and mx_status in ("mx_found", "implicit_mx_found"):
-        # Genuine SMTP recipient probe if enabled or requested
-        should_probe_smtp = perform_smtp or is_smtp_probe_enabled()
-        if should_probe_smtp and primary_mx:
-            smtp_probe_res = probe_smtp_recipient(normalized_email, primary_mx)
-
         # Stage 6: Provider-based verification over HTTPS (port 443)
         active_provider = provider or get_verification_provider()
         provider_res = active_provider.verify_recipient(normalized_email)
@@ -629,25 +691,13 @@ def verify_single_email(
         if provider_res.get("is_disposable"):
             disposable = True
     elif mx_status == "null_mx":
-        smtp_probe_res = {
-            "smtp_status": "rejected",
-            "smtp_attempted": False,
-            "smtp_response_code": None,
-            "smtp_response_message": None,
-            "smtp_server": primary_mx,
-            "smtp_duration_ms": 0.0,
-            "smtp_explanation": "SMTP probe skipped: Domain publishes RFC 7505 Null MX record ('0 .')."
-        }
+        if not perform_smtp:
+            smtp_probe_res["smtp_status"] = "rejected"
+            smtp_probe_res["smtp_explanation"] = "Domain publishes RFC 7505 Null MX record ('0 .')."
     elif domain_status == "nonexistent":
-        smtp_probe_res = {
-            "smtp_status": "unavailable",
-            "smtp_attempted": False,
-            "smtp_response_code": None,
-            "smtp_response_message": None,
-            "smtp_server": None,
-            "smtp_duration_ms": 0.0,
-            "smtp_explanation": "SMTP probe skipped: Domain does not exist in DNS (NXDOMAIN)."
-        }
+        if not perform_smtp:
+            smtp_probe_res["smtp_status"] = "unavailable"
+            smtp_probe_res["smtp_explanation"] = "Domain does not exist in DNS (NXDOMAIN)."
 
     # Stage 7: Result classification
     classification, status_cat, reason = classify_result(

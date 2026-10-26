@@ -138,7 +138,7 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
   - Recipient Verification: HTTPS REST API (Abstract API / Hunter / ZeroBounce) via Python `urllib.request`.
   - Disposable Detection: Curated dataset of 200+ known disposable and temporary email domains.
 - **Production WSGI:** `gunicorn`.
-- **Testing:** Python `unittest` suite (60 automated unit, integration, and mocking tests).
+- **Testing:** Python `unittest` suite (65 automated unit, integration, and mocking tests).
 - **Documentation & PDF Generation:** ReportLab (`submission/EmailCheck_Project_Submission.pdf`).
 
 ---
@@ -330,16 +330,16 @@ To add or update provider credentials on Render:
 
 ## Running Automated Tests
 
-The test suite contains **60 automated tests** covering syntax validation, normalization rules, disposable domain detection, mocked DNS MX resolution, RFC 7505 Null MX records, provider API integration adapters (Abstract, Hunter, ZeroBounce, Local), genuine SMTP probing protocol exchanges (`smtp_probe.py`), circuit breaker tripping, catch-all detection, quota handling, batch deduplication, and REST API endpoints.
+The test suite contains **65 automated tests** covering syntax validation, normalization rules, disposable domain detection, mocked DNS MX resolution, RFC 7505 Null MX records, provider API integration adapters (Abstract, Hunter, ZeroBounce, Local), genuine SMTP probing protocol exchanges (`smtp_probe.py`), opt-in checkbox request extraction (`check_smtp` & `smtp_check`), server configuration security controls, circuit breaker tripping, catch-all detection, quota handling, batch deduplication, and REST API endpoints.
 
 To run the automated tests:
 ```bash
 python -m unittest discover tests -v
 ```
 
-All 60 tests run isolated from external network dependencies via unittest mocks and complete in under 1 second:
+All 65 tests run isolated from external network dependencies via unittest mocks and complete in under 1 second:
 ```
-Ran 60 tests in 0.434s: OK
+Ran 65 tests in 0.349s: OK
 ```
 
 ---

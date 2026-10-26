@@ -234,7 +234,7 @@ def api_verify():
             "error": f"Request exceeds maximum limit of {MAX_EMAILS_PER_REQUEST} addresses per batch."
         }), 400
 
-    perform_smtp = bool(data.get("smtp_check", False))
+    perform_smtp = bool(data.get("check_smtp", data.get("smtp_check", False)))
 
     # Anonymized logging (Log count only; avoid logging actual emails for privacy)
     logger.info("Processing verification batch: count=%d, smtp_requested=%s", len(raw_emails), perform_smtp)

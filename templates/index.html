@@ -82,7 +82,7 @@
             <span class="sep" style="margin: 0 0.35rem; color: #94a3b8;">•</span>
             <strong>SMTP Outbound (Port 25):</strong>
             <span class="provider-pill {% if smtp_probe_enabled %}pill-pass{% else %}pill-untested{% endif %}">
-              {% if smtp_probe_enabled %}Enabled (Port {{ smtp_probe_config.port }}){% else %}Disabled (Render Cloud Fallback){% endif %}
+              {% if smtp_probe_enabled %}Allowed in Server Config (Port {{ smtp_probe_config.port }}){% else %}Disabled in Server Config (ENABLE_SMTP_PROBE=false){% endif %}
             </span>
           </span>
         </div>
@@ -163,10 +163,17 @@
                 <span>HTTPS Recipient Engine (Port 443)</span>
               </div>
 
-              <label class="smtp-toggle-label" title="Attempt a direct SMTP EHLO/MAIL FROM/RCPT TO handshake on compatible hosts (port 25). Render restricts outbound port 25, so requests safely fall back to HTTPS.">
-                <input type="checkbox" id="smtpProbeToggle" name="smtp_check" {% if smtp_probe_enabled %}checked{% endif %}>
-                <span>Optional SMTP Probe (Port 25)</span>
-              </label>
+              <div class="smtp-toggle-wrapper">
+                <label class="smtp-toggle-label" title="Attempt a direct SMTP EHLO/MAIL FROM/RCPT TO handshake on compatible hosts (port 25). Probing is opt-in and respects server security controls.">
+                  <input type="checkbox" id="smtpProbeToggle" name="smtp_check">
+                  <span>Optional SMTP Probe (Port 25)</span>
+                </label>
+                {% if smtp_probe_enabled %}
+                  <span class="smtp-config-pill pill-enabled" title="SMTP probing is permitted by server configuration (ENABLE_SMTP_PROBE=true). Note: Outbound port 25 is restricted by Render host firewall.">Server: Allowed</span>
+                {% else %}
+                  <span class="smtp-config-pill pill-disabled" title="SMTP probing is disabled in server configuration (ENABLE_SMTP_PROBE=false). Probes will report 'Disabled' unless configured in Render Dashboard.">Server: Disabled</span>
+                {% endif %}
+              </div>
 
               <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -178,6 +185,20 @@
                 </svg>
                 Load Diverse Sample List
               </button>
+            </div>
+
+            <div class="smtp-status-note" id="smtpStatusNote">
+              {% if smtp_probe_enabled %}
+                <span class="note-text info">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  SMTP probing is permitted by server configuration. On Render, outbound port 25 connections are filtered by the host firewall and will safely report <strong>Unavailable</strong> with HTTPS fallback.
+                </span>
+              {% else %}
+                <span class="note-text warning">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  Server environment has SMTP probing disabled (<code>ENABLE_SMTP_PROBE=false</code>). Probing requests will report <strong>Disabled</strong> unless <code>ENABLE_SMTP_PROBE=true</code> is configured in the Render Dashboard.
+                </span>
+              {% endif %}
             </div>
 
             <div class="form-actions">

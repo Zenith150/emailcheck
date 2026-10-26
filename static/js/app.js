@@ -269,6 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         body: JSON.stringify({
           emails: emails,
+          check_smtp: performSmtp,
           smtp_check: performSmtp
         })
       });
@@ -513,8 +514,10 @@ document.addEventListener('DOMContentLoaded', () => {
         smtpPill = `<span class="indicator-pill pill-inconclusive" title="${escapeHtml(smtpExp)}">⚠ Inconclusive${smtpCode ? ' (' + smtpCode + ')' : ''}</span>`;
       } else if (smtpSt === 'unavailable') {
         smtpPill = `<span class="indicator-pill pill-unavailable" title="${escapeHtml(smtpExp)}">⊘ Unavailable</span>`;
-      } else if (smtpSt === 'disabled' || smtpSt === 'skipped') {
+      } else if (smtpSt === 'disabled') {
         smtpPill = `<span class="indicator-pill pill-disabled" title="${escapeHtml(smtpExp)}">— Disabled</span>`;
+      } else if (smtpSt === 'skipped') {
+        smtpPill = `<span class="indicator-pill pill-disabled" title="${escapeHtml(smtpExp)}">— Skipped</span>`;
       }
 
       // Recipient / Provider Check Pill
@@ -529,7 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (rec === 'unknown') {
         recipientPill = `<span class="indicator-pill pill-untested">Inconclusive</span>`;
       } else if (rec === 'unavailable') {
-        recipientPill = `<span class="indicator-pill pill-untested">No Provider</span>`;
+        recipientPill = `<span class="indicator-pill pill-untested" title="No HTTPS verification provider API key configured. Recipient-level verification is unavailable.">Unavailable</span>`;
       } else if (rec === 'untested') {
         recipientPill = `<span class="indicator-pill pill-untested">Skipped</span>`;
       }

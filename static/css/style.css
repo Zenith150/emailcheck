@@ -1566,6 +1566,62 @@ textarea:focus {
 }
 
 /* SMTP Probe Toggle and Status Badges (v2.2) */
+.smtp-toggle-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.smtp-config-pill {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+}
+
+.smtp-config-pill.pill-enabled {
+  background-color: var(--color-green-bg);
+  color: var(--color-green-text);
+  border: 1px solid var(--color-green-border);
+}
+
+.smtp-config-pill.pill-disabled {
+  background-color: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+.smtp-status-note {
+  width: 100%;
+  margin-top: 0.4rem;
+  font-size: 0.775rem;
+  line-height: 1.4;
+}
+
+.note-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-sm);
+  width: 100%;
+}
+
+.note-text.info {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.note-text.warning {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
 .smtp-toggle-label {
   display: inline-flex;
   align-items: center;

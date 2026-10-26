@@ -223,6 +223,65 @@ class TestEmailCheckAPI(unittest.TestCase):
         data = response.get_json()
         self.assertFalse(data["success"])
 
+    @patch("app.verify_email_list")
+    def test_api_verify_reads_check_smtp_and_smtp_check_flags(self, mock_verify_list):
+        """POST /api/verify should correctly extract check_smtp and smtp_check flags."""
+        mock_verify_list.return_value = {
+            "success": True,
+            "total": 1,
+            "provider": "local",
+            "summary": {"total": 1, "valid": 0, "invalid": 0, "risky": 1, "unknown": 0},
+            "results": []
+        }
+
+        # Case 1: check_smtp=True
+        self.client.post(
+            "/api/verify",
+            data=json.dumps({"emails": ["test@example.com"], "check_smtp": True}),
+            content_type="application/json"
+        )
+        mock_verify_list.assert_called_with(
+            emails=["test@example.com"],
+            perform_smtp=True,
+            max_emails=100
+        )
+
+        # Case 2: smtp_check=True
+        self.client.post(
+            "/api/verify",
+            data=json.dumps({"emails": ["test@example.com"], "smtp_check": True}),
+            content_type="application/json"
+        )
+        mock_verify_list.assert_called_with(
+            emails=["test@example.com"],
+            perform_smtp=True,
+            max_emails=100
+        )
+
+        # Case 3: Neither flag passed (defaults to False - opt-in)
+        self.client.post(
+            "/api/verify",
+            data=json.dumps({"emails": ["test@example.com"]}),
+            content_type="application/json"
+        )
+        mock_verify_list.assert_called_with(
+            emails=["test@example.com"],
+            perform_smtp=False,
+            max_emails=100
+        )
+
+    def test_index_template_smtp_opt_in_and_server_status(self):
+        """GET / dashboard should render opt-in checkbox (not checked) and server status note."""
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        # Checkbox must exist and NOT be checked by default
+        self.assertIn('id="smtpProbeToggle"', html)
+        self.assertNotIn('id="smtpProbeToggle" name="smtp_check" checked', html)
+        self.assertIn("Optional SMTP Probe (Port 25)", html)
+        self.assertIn("Server:", html)
+        self.assertIn("smtp-status-note", html)
+
 
 if __name__ == "__main__":
     unittest.main()

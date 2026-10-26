@@ -131,7 +131,7 @@ def create_submission_pdf(
             Paragraph("<b>Stack:</b> Python 3.11, Flask 3.1, dnspython, smtplib, HTTPS APIs, Vanilla JS, CSS3", body_style),
         ],
         [
-            Paragraph("<b>Test Suite:</b> 60 / 60 Tests Passed (100% Pass Rate)", body_style),
+            Paragraph("<b>Test Suite:</b> 65 / 65 Tests Passed (100% Pass Rate)", body_style),
             Paragraph("<b>Hosting Target:</b> Render Cloud Web Service (WSGI Gunicorn)", body_style),
         ]
     ]
@@ -304,16 +304,17 @@ def create_submission_pdf(
     story.append(Paragraph("6. Automated Test Suite Summary", h2_style))
     test_text = (
         "The automated test suite across <code>tests/test_verifier.py</code>, <code>tests/test_smtp_probe.py</code>, and "
-        "<code>tests/test_api.py</code> was executed and passed completely with <b>60 passed tests in 0.43 seconds</b>:<br/>"
+        "<code>tests/test_api.py</code> was executed and passed completely with <b>65 passed tests in 0.35 seconds</b>:<br/>"
         "• Authoritative 7-Stage Pipeline definition & regression verification against LaTeX leaks: <b>PASSED</b><br/>"
         "• RFC 5322 Syntax validation & Local-part preserving Normalization: <b>PASSED</b><br/>"
         "• Disposable domain detection (Mailinator, Sharklasers, GuerrillaMail, etc.): <b>PASSED</b><br/>"
         "• DNS MX resolution, NXDOMAIN detection, RFC 7505 Null MX ('0 .'), and RFC 5321 implicit MX: <b>PASSED</b><br/>"
         "• Genuine SMTP probing protocol exchanges (250 OK, 550 Rejection, 450 Greylisting, Catch-all): <b>PASSED</b><br/>"
         "• SMTP Port 25 circuit breaker tripping, Null MX pre-connection abort, and DATA prevention: <b>PASSED</b><br/>"
-        "• Domain Diagnostics API (<code>GET/POST /api/domain</code>) & Pipeline API (<code>/api/pipeline</code>): <b>PASSED</b><br/>"
+        "• Opt-in checkbox request extraction (<code>check_smtp</code> & <code>smtp_check</code>) and server security controls: <b>PASSED</b><br/>"
+        "• Server-disabled reporting vs. host port 25 block reporting and UI rendering regression: <b>PASSED</b><br/>"
         "• HTTPS Provider integrations (Abstract, Hunter, ZeroBounce, Local fallback): <b>PASSED</b><br/>"
-        "• Classification logic (Valid, Invalid, Risky, Unknown) & Distinguishing domain from recipient verification: <b>PASSED</b><br/>"
+        "• Classification logic & clearly explaining recipient verification availability: <b>PASSED</b><br/>"
         "• Batch memoization, 100-email size boundaries, rate limiting, and API error handlers: <b>PASSED</b>"
     )
     story.append(Paragraph(test_text, body_style))
