@@ -131,7 +131,7 @@ def create_submission_pdf(
             Paragraph("<b>Stack:</b> Python 3.11, Flask 3.1, dnspython, smtplib, HTTPS APIs, Vanilla JS, CSS3", body_style),
         ],
         [
-            Paragraph("<b>Test Suite:</b> 69 / 69 Tests Passed (100% Pass Rate)", body_style),
+            Paragraph("<b>Test Suite:</b> 70 / 70 Tests Passed (100% Pass Rate)", body_style),
             Paragraph("<b>Hosting Target:</b> Render Cloud Web Service (WSGI Gunicorn)", body_style),
         ]
     ]
@@ -299,7 +299,7 @@ def create_submission_pdf(
     story.append(Paragraph("6. Automated Test Suite Summary", h2_style))
     test_text = (
         "The automated test suite across <code>tests/test_verifier.py</code>, <code>tests/test_smtp_probe.py</code>, and "
-        "<code>tests/test_api.py</code> was executed and passed completely with <b>69 passed tests in 0.31 seconds</b>:<br/>"
+        "<code>tests/test_api.py</code> was executed and passed completely with <b>70 passed tests in 0.35 seconds</b>:<br/>"
         "• Authoritative 7-Stage Pipeline definition & regression verification against LaTeX leaks: <b>PASSED</b><br/>"
         "• RFC 5322 Syntax validation & Local-part preserving Normalization: <b>PASSED</b><br/>"
         "• Disposable domain detection (Mailinator, Sharklasers, GuerrillaMail, etc.): <b>PASSED</b><br/>"

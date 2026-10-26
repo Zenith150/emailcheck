@@ -139,7 +139,7 @@ Client (EmailCheck)                           Recipient MX Server (Port 25)
   - Recipient Verification: HTTPS REST API (Abstract API / Hunter / ZeroBounce) via Python `urllib.request`.
   - Disposable Detection: Curated dataset of 200+ known disposable and temporary email domains.
 - **Production WSGI:** `gunicorn`.
-- **Testing:** Python `unittest` suite (69 automated unit, integration, and mocking tests).
+- **Testing:** Python `unittest` suite (70 automated unit, integration, and mocking tests).
 - **Documentation & PDF Generation:** ReportLab (`submission/EmailCheck_Project_Submission.pdf`).
 
 ---

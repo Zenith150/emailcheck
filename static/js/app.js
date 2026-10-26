@@ -387,7 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const matchesSearch = !q ||
         (item.email && item.email.toLowerCase().includes(q)) ||
         (item.domain && item.domain.toLowerCase().includes(q)) ||
-        (item.reason && item.reason.toLowerCase().includes(q));
+        (item.reason && item.reason.toLowerCase().includes(q)) ||
+        (item.short_reason && item.short_reason.toLowerCase().includes(q));
 
       return matchesFilter && matchesSearch;
     });
@@ -537,6 +538,33 @@ document.addEventListener('DOMContentLoaded', () => {
         recipientPill = `<span class="indicator-pill pill-untested">Skipped</span>`;
       }
 
+      // Shortened explanation for the main table per requirements
+      let displayReason = item.short_reason;
+      if (!displayReason) {
+        if ((cls === 'unknown' || cat === 'unknown') && (item.mx_status === 'mx_found' || item.mx_status === 'implicit_mx_found') && !item.is_disposable) {
+          displayReason = 'MX records found; mailbox status could not be confirmed.';
+        } else {
+          displayReason = item.reason;
+        }
+      }
+
+      // Tooltip explaining why the result is Unknown
+      let unknownTooltip = '';
+      if (cls === 'unknown' || cat === 'unknown') {
+        if ((item.mx_status === 'mx_found' || item.mx_status === 'implicit_mx_found') && !item.is_disposable) {
+          unknownTooltip = 'Why Unknown: Domain mail routing (MX) is valid, but specific recipient mailbox existence could not be confirmed without direct outbound SMTP access (port 25 is restricted on Render) or a verification provider API key.';
+        } else if (item.is_disposable) {
+          unknownTooltip = 'Why Unknown: Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). Deliverability is Unknown as disposable inboxes are short-lived or public.';
+        } else if (item.domain_status === 'dns_timeout' || item.mx_status === 'dns_timeout') {
+          unknownTooltip = 'Why Unknown: DNS lookup timed out or failed. Domain deliverability could not be evaluated.';
+        } else {
+          unknownTooltip = `Why Unknown: ${item.reason}`;
+        }
+        if (smtpProbe && smtpProbe.smtp_explanation && !unknownTooltip.includes(smtpProbe.smtp_explanation)) {
+          unknownTooltip += ` (SMTP: ${smtpProbe.smtp_explanation})`;
+        }
+      }
+
       // Main Table Row
       const row = document.createElement('tr');
       row.className = `result-row ${isExpanded ? 'row-expanded' : ''}`;
@@ -549,12 +577,15 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>${smtpPill}</td>
         <td>${recipientPill}</td>
         <td>
-          <span class="status-badge ${badgeClass}">
+          <span class="status-badge ${badgeClass}" ${unknownTooltip ? `title="${escapeHtml(unknownTooltip)}"` : ''}>
             ${badgeIcon}
             ${escapeHtml(item.classification)}
           </span>
         </td>
-        <td class="reason-cell">${escapeHtml(item.reason)}</td>
+        <td class="reason-cell" ${unknownTooltip ? `title="${escapeHtml(unknownTooltip)}"` : ''}>
+          ${escapeHtml(displayReason)}
+          ${unknownTooltip ? `<span class="tooltip-unknown-icon" title="${escapeHtml(unknownTooltip)}" style="cursor:help; margin-left:0.35rem; color:var(--text-muted); font-size:0.8rem;" aria-label="${escapeHtml(unknownTooltip)}">ⓘ</span>` : ''}
+        </td>
         <td style="text-align: center;">
           <button type="button" class="btn-details-toggle" data-email="${escapeHtml(item.email)}" aria-expanded="${isExpanded}">
             ${isExpanded ? '▲ Hide' : '▼ Details'}
@@ -579,6 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const durationText = item.duration_ms !== undefined ? `${item.duration_ms} ms` : 'N/A';
         const providerName = (item.provider_info && item.provider_info.provider) ? item.provider_info.provider : 'Local Engine';
+        const providerReason = (item.provider_info && item.provider_info.reason) ? item.provider_info.reason : '';
 
         detailsRow.innerHTML = `
           <td colspan="10" style="padding: 0;">
@@ -626,8 +658,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
               </div>
               <div class="detail-full-reason">
-                <strong>Diagnostic Explanation:</strong> ${escapeHtml(item.reason)}
-                ${smtpExp ? '<br/><strong style="margin-top:0.25rem; display:inline-block;">SMTP Probe Explanation:</strong> ' + escapeHtml(smtpExp) : ''}
+                <strong>Complete Diagnostic Explanation:</strong> ${escapeHtml(item.reason)}
+                ${smtpExp ? `<br/><strong style="margin-top:0.35rem; display:inline-block;">SMTP Probe Handshake Details:</strong> ${escapeHtml(smtpExp)}` : ''}
+                ${providerReason ? `<br/><strong style="margin-top:0.35rem; display:inline-block;">Provider Verification Details:</strong> ${escapeHtml(providerReason)}` : ''}
               </div>
             </div>
           </td>

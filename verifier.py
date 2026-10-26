@@ -629,6 +629,7 @@ def verify_single_email(
             "outcome": classification,
             "status_category": status_cat,
             "reason": reason,
+            "short_reason": reason,
             "duration_ms": duration_ms,
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
@@ -764,6 +765,10 @@ def verify_single_email(
 
     duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
+    short_reason = reason
+    if classification == "Unknown" and mx_status in ("mx_found", "implicit_mx_found") and not disposable:
+        short_reason = "MX records found; mailbox status could not be confirmed."
+
     return {
         "email": raw_email,
         "normalized_email": normalized_email,
@@ -788,6 +793,7 @@ def verify_single_email(
         "outcome": classification,
         "status_category": status_cat,
         "reason": reason,
+        "short_reason": short_reason,
         "duration_ms": duration_ms,
         "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }

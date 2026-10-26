@@ -660,6 +660,24 @@ class TestDomainDiagnosticsAndPipeline(unittest.TestCase):
         self.assertFalse(res["syntax_valid"])
         self.assertIsInstance(res["duration_ms"], (int, float))
 
+    @patch("verifier.check_domain_dns")
+    def test_verify_single_email_shortened_explanation_unverified_mx(self, mock_dns):
+        """When MX records exist but mailbox is unverified (Unknown), short_reason is shortened."""
+        mock_dns.return_value = {
+            "domain": "github.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail.github.com"],
+            "primary_mx": "mail.github.com",
+            "is_null_mx": False,
+            "error": None
+        }
+        res = verify_single_email("support@github.com", perform_smtp=False)
+        self.assertEqual(res["classification"], "Unknown")
+        self.assertEqual(res["short_reason"], "MX records found; mailbox status could not be confirmed.")
+        self.assertIn("Domain mail routing is active", res["reason"])
+        self.assertIn("Unknown", res["reason"])
+
     def test_verify_single_email_has_v2_2_smtp_probe_field(self):
         """verify_single_email must return smtp_probe dictionary structure."""
         res = verify_single_email("bad..syntax@@domain", perform_smtp=False)
