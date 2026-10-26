@@ -70,6 +70,7 @@ def test_live():
         'emails': [
             'bad..syntax@@domain',
             'user@nonexistent-domain-xyz987654321.org',
+            'service@example.org',
             'test@mailinator.com',
             'support@github.com'
         ]
