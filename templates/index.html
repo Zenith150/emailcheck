@@ -72,13 +72,18 @@
         <div class="host-notice-content">
           <span class="host-status-indicator {% if provider_configured %}host-status-online{% else %}host-status-info{% endif %}"></span>
           <span>
-            <strong>Recipient Verification Provider:</strong>
+            <strong>Recipient Verification:</strong>
             <span class="provider-pill">{{ provider_name|capitalize }} Engine</span>
             {% if provider_configured %}
-              — Active &amp; connected over HTTPS. Recipient-level verification is enabled.
+              — Active &amp; connected over HTTPS.
             {% else %}
-              — Running built-in engine (Syntax, Normalization, Disposable filter, DNS &amp; MX routing). Configure <code>EMAIL_VERIFICATION_API_KEY</code> in Render to enable external live recipient-level checks.
+              — Running built-in engine (Syntax, Normalization, Disposable filter, DNS &amp; MX routing).
             {% endif %}
+            <span class="sep" style="margin: 0 0.35rem; color: #94a3b8;">•</span>
+            <strong>SMTP Outbound (Port 25):</strong>
+            <span class="provider-pill {% if smtp_probe_enabled %}pill-pass{% else %}pill-untested{% endif %}">
+              {% if smtp_probe_enabled %}Enabled (Port {{ smtp_probe_config.port }}){% else %}Disabled (Render Cloud Fallback){% endif %}
+            </span>
           </span>
         </div>
       </div>
@@ -155,8 +160,13 @@
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
-                <span>HTTPS Recipient Verification (No Port 25 Required)</span>
+                <span>HTTPS Recipient Engine (Port 443)</span>
               </div>
+
+              <label class="smtp-toggle-label" title="Attempt a direct SMTP EHLO/MAIL FROM/RCPT TO handshake on compatible hosts (port 25). Render restricts outbound port 25, so requests safely fall back to HTTPS.">
+                <input type="checkbox" id="smtpProbeToggle" name="smtp_check" {% if smtp_probe_enabled %}checked{% endif %}>
+                <span>Optional SMTP Probe (Port 25)</span>
+              </label>
 
               <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -339,10 +349,11 @@
                   <th scope="col" style="width: 45px;">#</th>
                   <th scope="col">Email Address</th>
                   <th scope="col" style="width: 95px;" title="RFC 5322 syntax validation">Syntax</th>
-                  <th scope="col" style="width: 135px;" title="DNS resolution and Mail Exchanger (MX) routing">Domain / MX</th>
-                  <th scope="col" style="width: 105px;" title="Disposable or temporary inbox detection">Disposable</th>
-                  <th scope="col" style="width: 130px;" title="HTTPS provider recipient-level inbox verification">Recipient Check</th>
-                  <th scope="col" style="width: 130px;">Classification</th>
+                  <th scope="col" style="width: 130px;" title="DNS resolution and Mail Exchanger (MX) routing">Domain / MX</th>
+                  <th scope="col" style="width: 100px;" title="Disposable or temporary inbox detection">Disposable</th>
+                  <th scope="col" style="width: 115px;" title="Genuine SMTP recipient probe (EHLO/MAIL FROM/RCPT TO)">SMTP Probe</th>
+                  <th scope="col" style="width: 125px;" title="HTTPS provider recipient-level inbox verification">Recipient Check</th>
+                  <th scope="col" style="width: 125px;">Classification</th>
                   <th scope="col">Explanation &amp; Diagnostics</th>
                   <th scope="col" style="width: 80px; text-align: center;">Details</th>
                 </tr>

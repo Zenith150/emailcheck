@@ -1,12 +1,12 @@
-# EmailCheck — Email Verification & Deliverability Diagnostics (v2.1)
+# EmailCheck — Email Verification & Deliverability Diagnostics (v2.2)
 
-EmailCheck is a full-stack, responsive web application designed for non-invasive email verification and deliverability diagnostics. It resolves cloud hosting restrictions—such as Render's outbound TCP port 25 block—by combining a local 7-stage diagnostic pipeline with reputable email verification APIs operating over secure HTTPS (port 443).
+EmailCheck is a full-stack, responsive web application designed for non-invasive email verification and deliverability diagnostics. It resolves cloud hosting restrictions—such as Render's outbound TCP port 25 block—by combining a local 7-stage diagnostic pipeline, an optional genuine SMTP recipient probing module (`smtp_probe.py`) with an intelligent circuit breaker, and reputable email verification APIs operating over secure HTTPS (port 443).
 
 Addresses are classified into four transparent, conservative statuses:
-1. **Valid** (Green) — Syntax valid, active mail routing, not disposable, and recipient inbox confirmed deliverable.
-2. **Invalid** (Red) — Malformed syntax, nonexistent domain (NXDOMAIN), RFC 7505 Null MX, or confirmed undeliverable inbox.
-3. **Risky** (Amber) — Disposable/temporary domain, catch-all mail server, role account, or unverified recipient inbox (when running without a provider API key).
-4. **Unknown** (Slate) — DNS query timeout, server error, provider API rate limit (429), or quota exhaustion.
+1. **Valid** (Green) — Syntax valid, active mail routing, not disposable, and recipient inbox confirmed deliverable (via HTTPS provider or genuine SMTP 250 OK).
+2. **Invalid** (Red) — Malformed syntax, nonexistent domain (`NXDOMAIN`), RFC 7505 Null MX, explicit SMTP rejection (550), or confirmed undeliverable inbox.
+3. **Risky** (Amber) — Disposable/temporary domain, catch-all mail server, role account, or unverified recipient inbox (when running in Local Fallback mode without third-party API keys or SMTP access).
+4. **Unknown** (Slate) — DNS query timeout, server error, provider API rate limit (429), temporary SMTP greylisting (450), or hosting network block.
 
 ---
 
@@ -14,6 +14,7 @@ Addresses are classified into four transparent, conservative statuses:
 
 - [Live Demo & Repository Links](#live-demo--repository-links)
 - [Render Outbound SMTP (Port 25) Restriction & Solution](#render-outbound-smtp-port-25-restriction--solution)
+- [Genuine SMTP Probing Architecture (v2.2)](#genuine-smtp-probing-architecture-v22)
 - [Key Features](#key-features)
 - [Technology Stack](#technology-stack)
 - [The 7-Stage Verification Pipeline](#the-7-stage-verification-pipeline)
@@ -33,7 +34,7 @@ Addresses are classified into four transparent, conservative statuses:
 
 - **Live Application URL:** [https://emailcheck-7c9y.onrender.com/](https://emailcheck-7c9y.onrender.com/)
 - **GitHub Repository URL:** [https://github.com/Zenith150/emailcheck](https://github.com/Zenith150/emailcheck)
-- **Deployment Status:** **Active & Verified on Render** (`GET /health` → 200 OK)
+- **Deployment Status:** **Active & Verified on Render** (`GET /health` → 200 OK, v2.2.0)
 - **Project Submission Document:** [`submission/EmailCheck_Project_Submission.pdf`](submission/EmailCheck_Project_Submission.pdf)
 
 ---
@@ -41,25 +42,61 @@ Addresses are classified into four transparent, conservative statuses:
 ## Render Outbound SMTP (Port 25) Restriction & Solution
 
 ### The Problem
-Most modern cloud platforms—including **Render**, AWS EC2 (by default), DigitalOcean, and Heroku—strictly block or filter outbound TCP traffic on **port 25** to protect their network reputations and prevent spam abuse. In previous architectures, attempting a raw SMTP handshake (`HELO` → `MAIL FROM` → `RCPT TO`) from a Render container resulted in immediate socket timeouts, connection drops, or false failure reporting.
+Most modern cloud hosting platforms—including **Render**, AWS EC2 (by default), DigitalOcean, and Heroku—strictly block or filter outbound TCP traffic on **port 25** to protect their network reputations and prevent spam abuse. In standard architectures, attempting a raw SMTP handshake (`HELO` → `MAIL FROM` → `RCPT TO`) from a Render container results in immediate socket timeouts, connection drops, or false failure reporting.
+
+Furthermore, cloud platforms **cannot** simply redirect recipient checks to submission ports (`587` or `465`). Ports 587/465 are reserved for authenticated user mail submission (`MSA`), which require account credentials. Recipient mail exchange servers (`MX`) only listen for unauthenticated inbound mail routing on **port 25**.
 
 ### The Production Solution
-EmailCheck v2.1 solves this restriction cleanly and robustly without attempting to bypass network controls:
+EmailCheck v2.2 solves this restriction cleanly and robustly without attempting to bypass network controls:
 
-1. **HTTPS Provider-Based Verification (Port 443):**
-   Direct SMTP probing is replaced by reputable email verification REST APIs over standard HTTPS (port 443). The backend communicates with provider endpoints using Python standard library `urllib.request` with strict timeouts and resilient error handling.
+1. **Intelligent Port 25 Fallback & Fast Circuit Breaker:**
+   Direct SMTP probing is optional and controlled by `ENABLE_SMTP_PROBE` (default `false`). When enabled on an environment where port 25 is filtered (such as Render), the built-in circuit breaker detects the network block on the first timeout and immediately marks subsequent probes in that batch as `unavailable`, preventing hanging requests or slow user response times.
 
-2. **Modular Provider Architecture (`providers.py`):**
+2. **HTTPS Provider-Based Verification (Port 443):**
+   When direct SMTP probing is blocked or disabled, EmailCheck utilizes reputable email verification REST APIs over standard HTTPS (port 443). The backend communicates with provider endpoints using Python standard library `urllib.request` with strict timeouts and resilient error handling.
+
+3. **Modular Provider Architecture (`providers.py`):**
    The verification system defines a unified `BaseVerificationProvider` contract and includes out-of-the-box adapters for:
    - **Abstract API** (Default): Fast, recipient-level verification with deliverability scoring and catch-all detection.
    - **Hunter.io**: Industry-standard email verification with MX and SMTP status checks.
    - **ZeroBounce**: High-precision inbox validation and sub-status tagging.
    - **Local Fallback**: Zero-dependency local verification when no third-party API key is configured.
 
-3. **Transparent Fallback & Honest Reporting:**
-   - If no provider API key is configured, EmailCheck executes local syntax validation, domain normalization, disposable domain filtering, and DNS MX checks, while honestly classifying recipient inbox existence as unverified (`Risky`) rather than falsely claiming inbox delivery.
+4. **Transparent Fallback & Honest Reporting:**
+   - If no provider API key is configured and SMTP is unavailable, EmailCheck executes local syntax validation, domain normalization, disposable domain filtering, and DNS MX checks, while honestly classifying recipient inbox existence as unverified (`Risky`) rather than falsely claiming inbox delivery.
    - If a provider exceeds rate limits or quota (HTTP 429), the system marks the recipient check as `Unknown` rather than crashing or returning false positives.
-   - Direct SMTP probing is disabled by default (`ENABLE_DIRECT_SMTP=false`) and automatically bypassed on Render.
+
+---
+
+## Genuine SMTP Probing Architecture (v2.2)
+
+EmailCheck v2.2 introduces a dedicated, production-grade SMTP probing module in [`smtp_probe.py`](smtp_probe.py). It provides real, protocol-compliant recipient verification on compatible hosting environments while gracefully degrading on restricted hosts like Render.
+
+### Protocol Handshake Flow
+```
+Client (EmailCheck)                           Recipient MX Server (Port 25)
+        │                                                    │
+        ├────────────────── TCP Connect ────────────────────►│
+        │◄──────────────── 220 Service Ready ────────────────┤
+        ├────────────────── EHLO <hostname> ────────────────►│
+        │◄──────────────── 250 OK ───────────────────────────┤
+        ├────────────────── MAIL FROM:<sender> ──────────────►│
+        │◄──────────────── 250 OK Sender OK ─────────────────┤
+        ├────────────────── RCPT TO:<recipient> ─────────────►│
+        │◄──────────────── 250 OK / 550 User Unknown ────────┤
+        ├────────────────── RSET ────────────────────────────►│
+        │◄──────────────── 250 OK Reset ─────────────────────┤
+        ├────────────────── QUIT ────────────────────────────►│
+        │◄──────────────── 221 Bye ──────────────────────────┤
+```
+
+### Strict Security & Safety Guarantees
+- **NEVER ISSUES `DATA`:** EmailCheck **never** issues the SMTP `DATA` command. No message headers, subject lines, or body bytes are ever transmitted.
+- **NEVER SENDS MESSAGES:** The protocol sequence is strictly limited to recipient probing and is always aborted cleanly with `RSET` and `QUIT`.
+- **RFC 7505 Null MX Guard:** Domains with Null MX records (`0 .`) are rejected immediately before any network socket is opened.
+- **Safe Circuit Breaker:** In environments where outbound port 25 is blocked (Render), the first socket timeout trips an in-memory circuit breaker, instantaneously marking subsequent addresses in the batch as `unavailable` to prevent timeouts.
+- **Catch-All Domain Detection:** Probes a randomized non-existent address (`_emailcheck_verify_probe_test_@domain`) to verify whether the server accepts all recipients indiscriminately. Catch-all servers are safely classified as `inconclusive` (`Risky`).
+- **Response Sanitization:** All SMTP reply codes and messages are sanitized to strip CRLF control characters and bounded to 200 characters before inclusion in API or UI outputs.
 
 ---
 
@@ -69,16 +106,23 @@ EmailCheck v2.1 solves this restriction cleanly and robustly without attempting 
   - RFC 5322 and RFC 5321 syntax validation.
   - Case-preserving email normalization (lowercase domain, preserve local part).
   - Built-in disposable email domain blacklist (200+ domains including Mailinator, GuerrillaMail, TempMail).
-  - DNS resolution checking active MX records, NXDOMAIN existence, RFC 7505 Null MX (`0 .`), and RFC 5321 implicit MX fallback (A/AAAA).
+  - DNS resolution checking active MX records, `NXDOMAIN` existence, RFC 7505 Null MX (`0 .`), and RFC 5321 implicit MX fallback (A/AAAA).
+  - Optional genuine SMTP recipient probing (`smtp_probe.py`) with Render fallback.
   - Provider-based recipient inbox deliverability over HTTPS (port 443).
-- **Conservative Classification:** Never assumes mailbox existence when servers refuse disclosure, use catch-all routing, or when recipient verification is unconfigured.
+- **Conservative Deliverability Classification:**
+  - Clearly differentiates between **domain mail routing** and **recipient mailbox existence**.
+  - Conservatively treats SMTP 250 response as server-level recipient acceptance (not guaranteed inbox delivery due to spam filters/quotas).
+  - Marks temporary failures (SMTP 450 Greylisting) as `inconclusive` (`Unknown`) rather than `Invalid`.
 - **Batch Processing with Memoization:** Efficient in-memory caching prevents redundant DNS lookups and HTTP requests for duplicate domains and addresses within the same batch (up to 100 emails).
 - **Modern Responsive Dashboard:**
   - Real-time address counter (up to 100 per batch).
   - Five summary metric cards: **Total**, **Valid**, **Invalid**, **Risky**, and **Unknown**.
   - Interactive filter tabs (All, Valid, Invalid, Risky, Unknown) and real-time search box.
-  - Informational provider pill in the dashboard showing the active verification engine.
-  - One-click RFC 4180 compliant **CSV Export** with all diagnostic columns.
+  - Sorting and pagination for large batches.
+  - Collapsible per-row diagnostics showing DNS MX, HTTP Provider, and detailed SMTP Probe outputs.
+  - Dedicated **Domain Diagnostics** lookup tool.
+  - Local **Verification History** storing recent runs.
+  - One-click RFC 4180 compliant **CSV Export** with all diagnostic and SMTP columns.
 - **Production-Ready Backend:** Flask REST API with sliding-window rate limiting, input sanitization, health monitoring (`/health`), and WSGI production server (`gunicorn`).
 
 ---
@@ -90,10 +134,11 @@ EmailCheck v2.1 solves this restriction cleanly and robustly without attempting 
 - **Verification Engine:**
   - Syntax: `email-validator` with RFC 5322 regex fallback.
   - DNS / Routing: `dnspython` with public nameserver fallback (Google `8.8.8.8` / Cloudflare `1.1.1.1`).
+  - SMTP Probing: Python `smtplib` and `socket` standard libraries (`smtp_probe.py`).
   - Recipient Verification: HTTPS REST API (Abstract API / Hunter / ZeroBounce) via Python `urllib.request`.
   - Disposable Detection: Curated dataset of 200+ known disposable and temporary email domains.
 - **Production WSGI:** `gunicorn`.
-- **Testing:** Python `unittest` suite (37 automated unit, integration, and mocking tests).
+- **Testing:** Python `unittest` suite (60 automated unit, integration, and mocking tests).
 - **Documentation & PDF Generation:** ReportLab (`submission/EmailCheck_Project_Submission.pdf`).
 
 ---
@@ -128,13 +173,16 @@ EmailCheck v2.1 solves this restriction cleanly and robustly without attempting 
              └── MX Found (or Implicit MX A/AAAA)
                         │
                         ▼
-[ 6. HTTPS Provider Check (Port 443) ]
-             ├── Undeliverable Mailbox ───────────────► [ Invalid ]
-             ├── Catch-All Server Detected ───────────► [ Risky ]
-             ├── Quota Exceeded / Rate Limit (429) ───► [ Unknown ]
-             ├── Network / API Timeout ───────────────► [ Unknown ]
-             ├── No Provider Key Configured ──────────► [ Risky ] (Domain verified, inbox unverified)
-             └── Deliverable Mailbox ─────────────────► [ Valid ]
+[ 6. Recipient Inbox Verification ]
+             ├── Optional SMTP Probe (Port 25) ───► [ 250 OK -> Valid / 550 -> Invalid / 450 -> Unknown ]
+             │   └── (If port 25 blocked or disabled, falls back cleanly to HTTPS provider)
+             └── HTTPS Provider Check (Port 443)
+                 ├── Undeliverable Mailbox ───────────► [ Invalid ]
+                 ├── Catch-All Server Detected ───────► [ Risky ]
+                 ├── Quota Exceeded / Rate Limit (429)► [ Unknown ]
+                 ├── Network / API Timeout ───────────► [ Unknown ]
+                 ├── No Provider Key Configured ──────► [ Risky ] (Domain verified, inbox unverified)
+                 └── Deliverable Mailbox ─────────────► [ Valid ]
                         │
                         ▼
 [ 7. Result Classification & Transparent Explanation ]
@@ -146,10 +194,10 @@ EmailCheck v2.1 solves this restriction cleanly and robustly without attempting 
 
 | Classification | Badge | Meaning | Underlying Conditions |
 | :--- | :--- | :--- | :--- |
-| **Valid** | <font color="#047857">**Valid**</font> | High confidence deliverability. | • RFC syntax is valid<br>• Domain exists with active MX routing<br>• Domain is not a known disposable provider<br>• Recipient inbox confirmed deliverable via HTTPS provider API |
-| **Invalid** | <font color="#b91c1c">**Invalid**</font> | Mail will bounce or be rejected. | • Malformed syntax (missing `@`, consecutive dots, invalid characters)<br>• Nonexistent domain (`NXDOMAIN`)<br>• RFC 7505 Null MX record published (`0 .`)<br>• Domain has no MX and no A/AAAA records<br>• Provider API confirmed recipient inbox does not exist |
-| **Risky** | <font color="#b45309">**Risky**</font> | Mail may bounce, be temporary, or cannot be confirmed at the mailbox level. | • Known disposable/temporary email domain (e.g. Mailinator, GuerrillaMail)<br>• Catch-all mail server (accepts all addresses indiscriminately)<br>• Role-based account (`admin@`, `support@`)<br>• Local verification only: Domain MX is active, but recipient inbox is unverified (no API key configured) |
-| **Unknown** | <font color="#475569">**Unknown**</font> | Deliverability cannot be reliably determined. | • DNS query timeout or DNS server failure (`SERVFAIL`)<br>• Provider API rate limit (HTTP 429) or monthly quota reached<br>• Provider network timeout or transient connection error |
+| **Valid** | <font color="#047857">**Valid**</font> | High confidence deliverability. | • RFC syntax is valid<br>• Domain exists with active MX routing<br>• Domain is not a known disposable provider<br>• Recipient accepted during SMTP handshake (250 OK) OR confirmed deliverable via HTTPS provider API |
+| **Invalid** | <font color="#b91c1c">**Invalid**</font> | Mail will bounce or be rejected. | • Malformed syntax (missing `@`, consecutive dots, invalid characters)<br>• Nonexistent domain (`NXDOMAIN`)<br>• RFC 7505 Null MX record published (`0 .`)<br>• Domain has no MX and no A/AAAA records<br>• Remote server explicitly rejected recipient during SMTP handshake (550)<br>• Provider API confirmed recipient inbox does not exist |
+| **Risky** | <font color="#b45309">**Risky**</font> | Mail may bounce, be temporary, or cannot be confirmed at the mailbox level. | • Known disposable/temporary email domain (e.g. Mailinator, GuerrillaMail)<br>• Catch-all mail server (accepts all addresses indiscriminately)<br>• Role-based account (`admin@`, `support@`)<br>• Local fallback: Domain MX is active, but recipient inbox is unverified (no API key configured and SMTP unavailable) |
+| **Unknown** | <font color="#475569">**Unknown**</font> | Deliverability cannot be reliably determined. | • DNS query timeout or DNS server failure (`SERVFAIL`)<br>• Temporary SMTP rejection (450 Greylisting)<br>• Hosting network blocked outbound port 25 (Render fallback)<br>• Provider API rate limit (HTTP 429) or monthly quota reached<br>• Provider network timeout or transient connection error |
 
 ---
 
@@ -193,10 +241,14 @@ All settings are configured using standard environment variables (documented in 
 
 | Variable | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
+| `ENABLE_SMTP_PROBE` | boolean | `false` | Enable genuine SMTP recipient probing (`true`/`false`). Disabled by default for cloud hosts (Render) where port 25 is restricted. |
+| `SMTP_PROBE_PORT` | integer | `25` | Target port for recipient mail server SMTP handshake. Standard mail exchange is port 25. |
+| `SMTP_PROBE_TIMEOUT` | float | `5.0` | Socket timeout in seconds for SMTP probe connection and command responses. |
+| `SMTP_HELO_HOSTNAME` | string | `mail.emailcheck.app` | FQDN sent in the SMTP EHLO/HELO greeting command. |
+| `SMTP_PROBE_SENDER` | string | `verify@emailcheck.app` | Sender envelope address sent in the SMTP `MAIL FROM` command. |
 | `EMAIL_VERIFICATION_PROVIDER` | string | `abstract` | Provider adapter to use: `abstract`, `hunter`, `zerobounce`, or `local`. |
 | `EMAIL_VERIFICATION_API_KEY` | string | `""` | API key for the chosen provider. Stored server-side only; never sent to frontend. |
 | `EMAIL_VERIFICATION_TIMEOUT` | float | `6.0` | HTTP request timeout in seconds for provider API calls. |
-| `ENABLE_DIRECT_SMTP` | boolean | `false` | Set to `true` only on servers with open outbound port 25. Always `false` on Render. |
 | `MAX_EMAILS_PER_REQUEST` | integer | `100` | Maximum email addresses allowed per verification batch. |
 | `RATE_LIMIT_PER_MINUTE` | integer | `30` | Maximum batch requests per client IP per minute. |
 | `PORT` | integer | `5000` | Server listening port (automatically set by Render). |
@@ -278,16 +330,16 @@ To add or update provider credentials on Render:
 
 ## Running Automated Tests
 
-The test suite contains **37 automated tests** covering syntax validation, normalization rules, disposable domain detection, mocked DNS MX resolution, RFC 7505 Null MX records, provider API integration adapters (Abstract, Hunter, ZeroBounce, Local), quota handling, batch deduplication, and REST API endpoints.
+The test suite contains **60 automated tests** covering syntax validation, normalization rules, disposable domain detection, mocked DNS MX resolution, RFC 7505 Null MX records, provider API integration adapters (Abstract, Hunter, ZeroBounce, Local), genuine SMTP probing protocol exchanges (`smtp_probe.py`), circuit breaker tripping, catch-all detection, quota handling, batch deduplication, and REST API endpoints.
 
 To run the automated tests:
 ```bash
 python -m unittest discover tests -v
 ```
 
-All 37 tests run isolated from external network dependencies via unittest mocks and complete in under 2 seconds:
+All 60 tests run isolated from external network dependencies via unittest mocks and complete in under 1 second:
 ```
-Ran 37 tests in 1.641s: OK
+Ran 60 tests in 0.434s: OK
 ```
 
 ---
@@ -302,11 +354,19 @@ Ran 37 tests in 1.641s: OK
   {
     "status": "healthy",
     "service": "EmailCheck",
-    "version": "2.0.0",
+    "version": "2.2.0",
     "provider": "abstract",
     "provider_configured": false,
     "smtp_outbound_available": false,
-    "max_emails_per_request": 100
+    "smtp_probe_config": {
+      "enabled": false,
+      "port": 25,
+      "timeout": 5.0,
+      "helo_hostname": "mail.emailcheck.app",
+      "sender": "verify@emailcheck.app"
+    },
+    "pipeline_stage_count": 7,
+    "pipeline_stages": [ ... ]
   }
   ```
 
@@ -321,7 +381,8 @@ Ran 37 tests in 1.641s: OK
       "temp@mailinator.com",
       "malformed..syntax@@domain",
       "user@nonexistent-domain-1234.org"
-    ]
+    ],
+    "check_smtp": false
   }
   ```
 - **Response:**
@@ -347,69 +408,47 @@ Ran 37 tests in 1.641s: OK
         "mx_records": [
           "mail.example.com (priority 10)"
         ],
+        "is_null_mx": false,
         "disposable": false,
+        "smtp_probe": {
+          "smtp_status": "disabled",
+          "smtp_attempted": false,
+          "smtp_response_code": null,
+          "smtp_response_message": null,
+          "smtp_server": "mail.example.com",
+          "smtp_duration_ms": 0.0,
+          "smtp_explanation": "SMTP recipient probing is disabled by configuration (ENABLE_SMTP_PROBE=false)."
+        },
         "recipient_check": {
           "status": "deliverable",
           "provider": "abstract",
           "details": "Inbox verified deliverable."
         },
         "classification": "Valid",
-        "reason": "Valid syntax, active MX routing verified, and recipient inbox confirmed deliverable via HTTPS provider."
-      },
-      {
-        "email": "temp@mailinator.com",
-        "normalized_email": "temp@mailinator.com",
-        "syntax_valid": true,
-        "domain": "mailinator.com",
-        "domain_status": "exists",
-        "mx_status": "mx_found",
-        "mx_records": [
-          "mail2.mailinator.com (priority 10)"
-        ],
-        "disposable": true,
-        "recipient_check": {
-          "status": "risky",
-          "provider": "abstract",
-          "details": "Temporary/disposable domain detected."
-        },
-        "classification": "Risky",
-        "reason": "Address belongs to a known temporary or disposable email domain (mailinator.com). Messages may be ephemeral or public."
-      },
-      {
-        "email": "malformed..syntax@@domain",
-        "normalized_email": "malformed..syntax@@domain",
-        "syntax_valid": false,
-        "domain": "",
-        "domain_status": "untested",
-        "mx_status": "untested",
-        "mx_records": [],
-        "disposable": false,
-        "recipient_check": {
-          "status": "skipped",
-          "provider": "none",
-          "details": "Skipped due to syntax failure"
-        },
-        "classification": "Invalid",
-        "reason": "Invalid email syntax: Email contains multiple '@' symbols.."
-      },
-      {
-        "email": "user@nonexistent-domain-1234.org",
-        "normalized_email": "user@nonexistent-domain-1234.org",
-        "syntax_valid": true,
-        "domain": "nonexistent-domain-1234.org",
-        "domain_status": "nonexistent",
-        "mx_status": "none",
-        "mx_records": [],
-        "disposable": false,
-        "recipient_check": {
-          "status": "skipped",
-          "provider": "none",
-          "details": "Domain does not exist"
-        },
-        "classification": "Invalid",
-        "reason": "The domain does not exist in DNS (NXDOMAIN). Mail sent to this address will bounce."
+        "reason": "Syntax valid, active MX routing verified, and recipient inbox confirmed deliverable via HTTPS provider.",
+        "duration_ms": 42.1,
+        "checked_at": "2026-10-26T21:25:00.000Z"
       }
     ]
+  }
+  ```
+
+### 3. Domain Diagnostics
+- **Endpoint:** `POST /api/domain` or `GET /api/domain?domain=example.com`
+- **Response:**
+  ```json
+  {
+    "success": true,
+    "domain": "example.com",
+    "domain_status": "exists",
+    "mx_status": "mx_found",
+    "is_null_mx": false,
+    "is_disposable": false,
+    "can_receive_email": true,
+    "primary_mx": "mail.example.com",
+    "mx_records": ["mail.example.com (priority 10)"],
+    "verdict": "Ready to Receive Mail",
+    "checked_at": "2026-10-26T21:25:00.000Z"
   }
   ```
 

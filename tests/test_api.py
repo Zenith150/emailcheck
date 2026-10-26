@@ -26,16 +26,17 @@ class TestEmailCheckAPI(unittest.TestCase):
         self.assertIn(b"Verify Emails", response.data)
 
     def test_get_health_endpoint(self):
-        """Health check endpoint should return healthy status, v2.1, and 7 pipeline stages."""
+        """Health check endpoint should return healthy status, v2.2, and 7 pipeline stages."""
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["service"], "EmailCheck")
-        self.assertEqual(data["version"], "2.1.0")
+        self.assertEqual(data["version"], "2.2.0")
         self.assertIn("provider", data)
         self.assertIn("provider_configured", data)
         self.assertIn("smtp_outbound_available", data)
+        self.assertIn("smtp_probe_config", data)
         self.assertEqual(data["pipeline_stage_count"], 7)
         self.assertEqual(len(data["pipeline_stages"]), 7)
 

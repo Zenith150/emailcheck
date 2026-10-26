@@ -256,6 +256,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const smtpToggle = document.getElementById('smtpProbeToggle');
+    const performSmtp = smtpToggle ? smtpToggle.checked : false;
+
     setLoadingState(true);
 
     try {
@@ -266,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         body: JSON.stringify({
           emails: emails,
-          smtp_check: false
+          smtp_check: performSmtp
         })
       });
 
@@ -495,6 +498,25 @@ document.addEventListener('DOMContentLoaded', () => {
         disposablePill = `<span class="indicator-pill pill-untested">—</span>`;
       }
 
+      // SMTP Probe Pill (Genuine SMTP Protocol Handshake)
+      let smtpPill = `<span class="indicator-pill pill-disabled">— Disabled</span>`;
+      const smtpProbe = item.smtp_probe || {};
+      const smtpSt = (smtpProbe.smtp_status || item.smtp_status || 'disabled').toLowerCase();
+      const smtpCode = smtpProbe.smtp_response_code;
+      const smtpExp = smtpProbe.smtp_explanation || '';
+
+      if (smtpSt === 'accepted' || smtpSt === 'mailbox_accepted') {
+        smtpPill = `<span class="indicator-pill pill-accepted" title="${escapeHtml(smtpExp)}">✓ Accepted (${smtpCode || 250})</span>`;
+      } else if (smtpSt === 'rejected' || smtpSt === 'mailbox_rejected') {
+        smtpPill = `<span class="indicator-pill pill-rejected" title="${escapeHtml(smtpExp)}">✗ Rejected (${smtpCode || 550})</span>`;
+      } else if (smtpSt === 'inconclusive') {
+        smtpPill = `<span class="indicator-pill pill-inconclusive" title="${escapeHtml(smtpExp)}">⚠ Inconclusive${smtpCode ? ' (' + smtpCode + ')' : ''}</span>`;
+      } else if (smtpSt === 'unavailable') {
+        smtpPill = `<span class="indicator-pill pill-unavailable" title="${escapeHtml(smtpExp)}">⊘ Unavailable</span>`;
+      } else if (smtpSt === 'disabled' || smtpSt === 'skipped') {
+        smtpPill = `<span class="indicator-pill pill-disabled" title="${escapeHtml(smtpExp)}">— Disabled</span>`;
+      }
+
       // Recipient / Provider Check Pill
       let recipientPill = `<span class="indicator-pill pill-untested">Unverified</span>`;
       const rec = (item.recipient_status || '').toLowerCase();
@@ -521,6 +543,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>${syntaxPill}</td>
         <td>${mxPill}</td>
         <td>${disposablePill}</td>
+        <td>${smtpPill}</td>
         <td>${recipientPill}</td>
         <td>
           <span class="status-badge ${badgeClass}">
@@ -555,7 +578,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const providerName = (item.provider_info && item.provider_info.provider) ? item.provider_info.provider : 'Local Engine';
 
         detailsRow.innerHTML = `
-          <td colspan="9" style="padding: 0;">
+          <td colspan="10" style="padding: 0;">
             <div class="email-details-panel">
               <div class="details-grid">
                 <div class="detail-item">
@@ -579,6 +602,14 @@ document.addEventListener('DOMContentLoaded', () => {
                   <span class="detail-value">${item.is_disposable ? '⚠ Yes (Temporary domain)' : '✓ Clean (Not disposable)'}</span>
                 </div>
                 <div class="detail-item">
+                  <span class="detail-label">SMTP Probe Handshake</span>
+                  <span class="detail-value">
+                    <strong>${escapeHtml(smtpSt.toUpperCase())}</strong>
+                    ${smtpCode ? ' (Code ' + escapeHtml(smtpCode) + ')' : ''}
+                    ${smtpProbe.smtp_server ? ' via <code>' + escapeHtml(smtpProbe.smtp_server) + '</code>' : ''}
+                  </span>
+                </div>
+                <div class="detail-item">
                   <span class="detail-label">Provider Recipient Check</span>
                   <span class="detail-value">${escapeHtml(item.recipient_status || 'Unverified')} (${escapeHtml(providerName)})</span>
                 </div>
@@ -593,6 +624,7 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
               <div class="detail-full-reason">
                 <strong>Diagnostic Explanation:</strong> ${escapeHtml(item.reason)}
+                ${smtpExp ? '<br/><strong style="margin-top:0.25rem; display:inline-block;">SMTP Probe Explanation:</strong> ' + escapeHtml(smtpExp) : ''}
               </div>
             </div>
           </td>
@@ -702,6 +734,12 @@ document.addEventListener('DOMContentLoaded', () => {
       'Discovered Mail Servers',
       'Is Null MX',
       'Is Disposable',
+      'SMTP Status',
+      'SMTP Attempted',
+      'SMTP Response Code',
+      'SMTP Server',
+      'SMTP Duration (ms)',
+      'SMTP Explanation',
       'Recipient Status',
       'Provider',
       'Verification Duration (ms)',
@@ -715,23 +753,32 @@ document.addEventListener('DOMContentLoaded', () => {
       return `"${str}"`;
     };
 
-    const rows = results.map(item => [
-      escapeCsvValue(item.email),
-      escapeCsvValue(item.normalized_email || item.email),
-      escapeCsvValue(item.classification),
-      escapeCsvValue(item.status_category),
-      escapeCsvValue(item.syntax_valid),
-      escapeCsvValue(item.domain_status),
-      escapeCsvValue(item.mx_status),
-      escapeCsvValue(item.mx_records ? item.mx_records.join('; ') : ''),
-      escapeCsvValue(item.is_null_mx ? 'true' : 'false'),
-      escapeCsvValue(item.is_disposable ? 'true' : 'false'),
-      escapeCsvValue(item.recipient_status),
-      escapeCsvValue(item.provider_info ? item.provider_info.provider : 'Local Engine'),
-      escapeCsvValue(item.duration_ms !== undefined ? item.duration_ms : ''),
-      escapeCsvValue(item.checked_at || new Date().toISOString()),
-      escapeCsvValue(item.reason)
-    ].join(','));
+    const rows = results.map(item => {
+      const probe = item.smtp_probe || {};
+      return [
+        escapeCsvValue(item.email),
+        escapeCsvValue(item.normalized_email || item.email),
+        escapeCsvValue(item.classification),
+        escapeCsvValue(item.status_category),
+        escapeCsvValue(item.syntax_valid),
+        escapeCsvValue(item.domain_status),
+        escapeCsvValue(item.mx_status),
+        escapeCsvValue(item.mx_records ? item.mx_records.join('; ') : ''),
+        escapeCsvValue(item.is_null_mx ? 'true' : 'false'),
+        escapeCsvValue(item.is_disposable ? 'true' : 'false'),
+        escapeCsvValue(probe.smtp_status || item.smtp_status || 'disabled'),
+        escapeCsvValue(probe.smtp_attempted ? 'true' : 'false'),
+        escapeCsvValue(probe.smtp_response_code !== null && probe.smtp_response_code !== undefined ? probe.smtp_response_code : ''),
+        escapeCsvValue(probe.smtp_server || ''),
+        escapeCsvValue(probe.smtp_duration_ms !== undefined ? probe.smtp_duration_ms : ''),
+        escapeCsvValue(probe.smtp_explanation || ''),
+        escapeCsvValue(item.recipient_status),
+        escapeCsvValue(item.provider_info ? item.provider_info.provider : 'Local Engine'),
+        escapeCsvValue(item.duration_ms !== undefined ? item.duration_ms : ''),
+        escapeCsvValue(item.checked_at || new Date().toISOString()),
+        escapeCsvValue(item.reason)
+      ].join(',');
+    });
 
     const csvContent = [headers.join(','), ...rows].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

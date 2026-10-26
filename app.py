@@ -1,7 +1,8 @@
 """
-EmailCheck - Flask Web Application (v2.1)
+EmailCheck - Flask Web Application (v2.2)
 Provides responsive dashboard UI, REST API (/api/verify, /api/domain), and health monitoring (/health)
-with HTTPS verification provider support, disposable email detection, and RFC 7505 Null MX handling.
+with HTTPS verification provider support, disposable email detection, RFC 7505 Null MX handling,
+and modular genuine SMTP probing with Render port 25 fallback.
 """
 
 import os
@@ -17,6 +18,7 @@ from verifier import (
     PIPELINE_STAGES
 )
 from providers import get_verification_provider
+from smtp_probe import get_smtp_probe_config, is_smtp_probe_enabled
 
 # Configure logging (Privacy-first: do NOT log full email addresses or API keys)
 logging.basicConfig(
@@ -70,10 +72,13 @@ def index():
     smtp_available = check_cached_smtp_capability()
     provider = get_verification_provider()
     has_api_key = bool(os.environ.get("EMAIL_VERIFICATION_API_KEY", "").strip())
+    smtp_probe_cfg = get_smtp_probe_config()
     
     return render_template(
         "index.html",
         smtp_available=smtp_available,
+        smtp_probe_enabled=smtp_probe_cfg["enabled"],
+        smtp_probe_config=smtp_probe_cfg,
         provider_name=provider.name,
         provider_configured=has_api_key,
         max_emails=MAX_EMAILS_PER_REQUEST,
@@ -88,14 +93,16 @@ def health():
     smtp_available = check_cached_smtp_capability()
     provider = get_verification_provider()
     has_api_key = bool(os.environ.get("EMAIL_VERIFICATION_API_KEY", "").strip())
+    smtp_probe_cfg = get_smtp_probe_config()
     
     return jsonify({
         "status": "healthy",
         "service": "EmailCheck",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "provider": provider.name,
         "provider_configured": has_api_key,
         "smtp_outbound_available": smtp_available,
+        "smtp_probe_config": smtp_probe_cfg,
         "max_emails_per_request": MAX_EMAILS_PER_REQUEST,
         "pipeline_stages": PIPELINE_STAGES,
         "pipeline_stage_count": len(PIPELINE_STAGES)
@@ -259,9 +266,12 @@ def not_found(e):
         return jsonify({"success": False, "error": "Endpoint not found."}), 404
     provider = get_verification_provider()
     has_api_key = bool(os.environ.get("EMAIL_VERIFICATION_API_KEY", "").strip())
+    smtp_probe_cfg = get_smtp_probe_config()
     return render_template(
         "index.html",
         smtp_available=check_cached_smtp_capability(),
+        smtp_probe_enabled=smtp_probe_cfg["enabled"],
+        smtp_probe_config=smtp_probe_cfg,
         provider_name=provider.name,
         provider_configured=has_api_key,
         max_emails=MAX_EMAILS_PER_REQUEST,

@@ -1565,6 +1565,62 @@ textarea:focus {
   margin: 1.75rem 0 1rem;
 }
 
+/* SMTP Probe Toggle and Status Badges (v2.2) */
+.smtp-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: var(--bg-surface-alt);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  transition: all 0.15s ease;
+}
+
+.smtp-toggle-label:hover {
+  border-color: #93c5fd;
+  color: var(--primary);
+}
+
+.smtp-toggle-label input[type="checkbox"] {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.pill-accepted {
+  background-color: var(--color-green-bg);
+  color: var(--color-green-text);
+  border: 1px solid var(--color-green-border);
+}
+
+.pill-rejected {
+  background-color: var(--color-red-bg);
+  color: var(--color-red-text);
+  border: 1px solid var(--color-red-border);
+}
+
+.pill-inconclusive {
+  background-color: var(--color-amber-bg);
+  color: var(--color-amber-text);
+  border: 1px solid var(--color-amber-border);
+}
+
+.pill-unavailable {
+  background-color: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+.pill-disabled {
+  background-color: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+}
+
 /* Accessibility & Reduced Motion */
 :focus-visible {
   outline: 2px solid var(--primary);

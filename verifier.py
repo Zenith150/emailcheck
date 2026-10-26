@@ -1,5 +1,5 @@
 """
-EmailCheck - Verification Core Logic (v2.1)
+EmailCheck - Verification Core Logic (v2.2)
 Implements an authoritative 7-stage non-invasive email verification pipeline:
 1. Syntax Validation (RFC 5322)
 2. Normalization (preserves local-part, normalizes domain)
@@ -8,6 +8,8 @@ Implements an authoritative 7-stage non-invasive email verification pipeline:
 5. MX Record Validation (including RFC 7505 Null MX & RFC 5321 Implicit MX)
 6. Provider-based HTTPS Inbox Verification (Abstract, Hunter, ZeroBounce, or Local Fallback)
 7. Result Classification (Valid, Invalid, Risky, Unknown)
+Includes optional, modular genuine SMTP probing (EHLO/MAIL FROM/RCPT TO/RSET/QUIT)
+with circuit-breaker fallback on hosting environments that restrict outbound port 25.
 """
 
 import os
@@ -28,6 +30,11 @@ except ImportError:
     HAS_EMAIL_VALIDATOR = False
 
 from providers import is_disposable_domain, get_verification_provider, BaseVerificationProvider
+from smtp_probe import (
+    probe_smtp_recipient,
+    get_smtp_probe_config,
+    is_smtp_probe_enabled
+)
 
 # Authoritative definition of the 7 pipeline stages
 PIPELINE_STAGES = [
@@ -452,7 +459,14 @@ def classify_result(
     if is_disposable:
         return "Risky", "risky", "Domain belongs to a known temporary/disposable email service (e.g., mailinator.com). These inboxes are short-lived and risky for deliverability."
 
-    # 7. Provider-Based Inbox Verification (HTTPS)
+    # 7. Check if genuine SMTP probe explicitly rejected the recipient
+    if smtp_info and smtp_info.get("smtp_attempted"):
+        smtp_st = smtp_info.get("smtp_status")
+        smtp_exp = smtp_info.get("smtp_explanation") or smtp_info.get("reason", "")
+        if smtp_st in ("rejected", "mailbox_rejected"):
+            return "Invalid", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_exp}."
+
+    # 8. Provider-Based Inbox Verification (HTTPS)
     if provider_res:
         p_status = provider_res.get("status")
         p_reason = provider_res.get("reason", "")
@@ -472,6 +486,12 @@ def classify_result(
             return "Risky", "risky", f"Address flagged as risky ({p_reason})."
 
         elif p_status == "unavailable":
+            # If provider is unconfigured (Local fallback), check if genuine SMTP probe succeeded
+            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
+                return "Valid", "valid", (
+                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK). "
+                    "Note: Confirms address acceptance during SMTP transaction; downstream inbox placement is not guaranteed."
+                )
             # Provider is unconfigured (Local engine): domain is valid, but recipient inbox is unverified
             return "Risky", "risky", (
                 "Domain mail routing is active (MX verified). Recipient-level verification is unverified because no provider API key is configured. "
@@ -479,24 +499,28 @@ def classify_result(
             )
 
         elif p_status == "unknown":
+            if smtp_info and smtp_info.get("smtp_attempted") and smtp_info.get("smtp_status") in ("accepted", "mailbox_accepted"):
+                return "Valid", "valid", (
+                    "Syntax valid, active MX routing verified, and recipient accepted by server during SMTP handshake (250 OK)."
+                )
             return "Unknown", "unknown", f"Recipient inbox verification was inconclusive ({p_reason})."
 
-    # 8. Optional Direct SMTP Check (if enabled and attempted)
+    # 9. Optional Direct SMTP Check (if no HTTPS provider was queried)
     if smtp_info and smtp_info.get("smtp_attempted"):
         smtp_status = smtp_info.get("smtp_status")
-        smtp_reason = smtp_info.get("reason", "")
+        smtp_reason = smtp_info.get("smtp_explanation") or smtp_info.get("reason", "")
         is_catch_all = smtp_info.get("is_catch_all", False)
 
-        if smtp_status == "mailbox_rejected":
-            return "Invalid", "invalid", f"Mail server explicitly rejected mailbox: {smtp_reason}."
+        if smtp_status in ("rejected", "mailbox_rejected"):
+            return "Invalid", "invalid", f"Mail server explicitly rejected recipient during SMTP handshake: {smtp_reason}."
         if smtp_status == "catch_all" or is_catch_all:
             return "Risky", "risky", "Domain server is configured as catch-all (accepts any mailbox). Individual mailbox existence cannot be confirmed."
-        if smtp_status in ("connection_failed", "timeout"):
+        if smtp_status in ("connection_failed", "timeout", "unavailable"):
             return "Unknown", "unknown", "Outbound direct SMTP connection was blocked or timed out (standard mail port 25 restricted on hosting platform). Mail routing is valid, but specific mailbox existence cannot be confirmed."
-        if smtp_status == "mailbox_accepted":
-            return "Valid", "valid", "Syntax valid, MX routing verified, and mail server accepted recipient in SMTP handshake."
+        if smtp_status in ("accepted", "mailbox_accepted"):
+            return "Valid", "valid", "Syntax valid, MX routing verified, and mail server accepted recipient in SMTP handshake (250 OK)."
 
-    # 9. Fallback if no provider and no SMTP attempted:
+    # 10. Fallback if no provider and no SMTP attempted:
     # Explicitly distinguish domain-level validation from recipient-level verification!
     return "Risky", "risky", (
         "Valid syntax and active MX routing verified. Recipient inbox verification is unverified. "
@@ -530,6 +554,15 @@ def verify_single_email(
             syntax_error=syntax_err
         )
         duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
+        default_smtp = {
+            "smtp_status": "disabled" if not is_smtp_probe_enabled() and not perform_smtp else "skipped",
+            "smtp_attempted": False,
+            "smtp_response_code": None,
+            "smtp_response_message": None,
+            "smtp_server": None,
+            "smtp_duration_ms": 0.0,
+            "smtp_explanation": "SMTP probe skipped due to invalid email syntax."
+        }
         return {
             "email": raw_email,
             "normalized_email": normalized_email,
@@ -543,7 +576,8 @@ def verify_single_email(
             "is_disposable": False,
             "recipient_status": "untested",
             "provider_info": None,
-            "smtp_status": "skipped",
+            "smtp_probe": default_smtp,
+            "smtp_status": default_smtp["smtp_status"],
             "classification": classification,
             "status_category": status_cat,
             "reason": reason,
@@ -568,11 +602,25 @@ def verify_single_email(
     primary_mx = dns_result.get("primary_mx")
     dns_err = dns_result.get("error")
 
-    # If domain doesn't exist, has Null MX, or has DNS error, do not call provider
+    # SMTP probe result
+    smtp_probe_res = {
+        "smtp_status": "disabled" if not is_smtp_probe_enabled() and not perform_smtp else "skipped",
+        "smtp_attempted": False,
+        "smtp_response_code": None,
+        "smtp_response_message": None,
+        "smtp_server": primary_mx,
+        "smtp_duration_ms": 0.0,
+        "smtp_explanation": "SMTP recipient probing is disabled."
+    }
+
     provider_res = None
-    smtp_info = None
 
     if domain_status == "exists" and mx_status in ("mx_found", "implicit_mx_found"):
+        # Genuine SMTP recipient probe if enabled or requested
+        should_probe_smtp = perform_smtp or is_smtp_probe_enabled()
+        if should_probe_smtp and primary_mx:
+            smtp_probe_res = probe_smtp_recipient(normalized_email, primary_mx)
+
         # Stage 6: Provider-based verification over HTTPS (port 443)
         active_provider = provider or get_verification_provider()
         provider_res = active_provider.verify_recipient(normalized_email)
@@ -580,11 +628,26 @@ def verify_single_email(
         # Check if provider detected disposable
         if provider_res.get("is_disposable"):
             disposable = True
-
-        # Optional legacy direct SMTP check (only if explicitly requested and enabled)
-        enable_direct_smtp = os.environ.get("ENABLE_DIRECT_SMTP", "false").lower() == "true"
-        if perform_smtp and enable_direct_smtp and primary_mx:
-            smtp_info = check_smtp_recipient(normalized_email, primary_mx)
+    elif mx_status == "null_mx":
+        smtp_probe_res = {
+            "smtp_status": "rejected",
+            "smtp_attempted": False,
+            "smtp_response_code": None,
+            "smtp_response_message": None,
+            "smtp_server": primary_mx,
+            "smtp_duration_ms": 0.0,
+            "smtp_explanation": "SMTP probe skipped: Domain publishes RFC 7505 Null MX record ('0 .')."
+        }
+    elif domain_status == "nonexistent":
+        smtp_probe_res = {
+            "smtp_status": "unavailable",
+            "smtp_attempted": False,
+            "smtp_response_code": None,
+            "smtp_response_message": None,
+            "smtp_server": None,
+            "smtp_duration_ms": 0.0,
+            "smtp_explanation": "SMTP probe skipped: Domain does not exist in DNS (NXDOMAIN)."
+        }
 
     # Stage 7: Result classification
     classification, status_cat, reason = classify_result(
@@ -593,15 +656,15 @@ def verify_single_email(
         mx_status=mx_status,
         is_disposable=disposable,
         provider_res=provider_res,
-        smtp_info=smtp_info,
+        smtp_info=smtp_probe_res,
         domain_error=dns_err
     )
 
     recipient_status = "untested"
     if provider_res:
         recipient_status = provider_res.get("status", "unknown")
-    elif smtp_info:
-        recipient_status = smtp_info.get("smtp_status", "unknown")
+    elif smtp_probe_res.get("smtp_attempted"):
+        recipient_status = smtp_probe_res.get("smtp_status", "unknown")
 
     duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
@@ -623,7 +686,8 @@ def verify_single_email(
             "score": provider_res.get("score") if provider_res else None,
             "reason": provider_res.get("reason") if provider_res else None
         } if provider_res else None,
-        "smtp_status": smtp_info.get("smtp_status", "skipped") if smtp_info else recipient_status,
+        "smtp_probe": smtp_probe_res,
+        "smtp_status": smtp_probe_res.get("smtp_status", "disabled"),
         "classification": classification,
         "status_category": status_cat,
         "reason": reason,

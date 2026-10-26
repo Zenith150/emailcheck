@@ -587,6 +587,15 @@ class TestDomainDiagnosticsAndPipeline(unittest.TestCase):
         self.assertFalse(res["syntax_valid"])
         self.assertIsInstance(res["duration_ms"], (int, float))
 
+    def test_verify_single_email_has_v2_2_smtp_probe_field(self):
+        """verify_single_email must return smtp_probe dictionary structure."""
+        res = verify_single_email("bad..syntax@@domain", perform_smtp=False)
+        self.assertIn("smtp_probe", res)
+        self.assertIsInstance(res["smtp_probe"], dict)
+        self.assertIn("smtp_status", res["smtp_probe"])
+        self.assertIn("smtp_attempted", res["smtp_probe"])
+        self.assertIn("smtp_explanation", res["smtp_probe"])
+
 
 if __name__ == "__main__":
     unittest.main()

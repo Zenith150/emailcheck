@@ -15,6 +15,16 @@ services:
         sync: false
       - key: EMAIL_VERIFICATION_TIMEOUT
         value: 6.0
+      - key: ENABLE_SMTP_PROBE
+        value: false
+      - key: SMTP_PROBE_PORT
+        value: 25
+      - key: SMTP_PROBE_TIMEOUT
+        value: 5
+      - key: SMTP_HELO_HOSTNAME
+        value: mail.emailcheck.app
+      - key: SMTP_PROBE_SENDER
+        value: verify@emailcheck.app
       - key: ENABLE_DIRECT_SMTP
         value: false
       - key: MAX_EMAILS_PER_REQUEST
