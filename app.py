@@ -1,6 +1,6 @@
 """
-EmailCheck - Flask Web Application (v2.0)
-Provides responsive dashboard UI, REST API (/api/verify), and health monitoring (/health)
+EmailCheck - Flask Web Application (v2.1)
+Provides responsive dashboard UI, REST API (/api/verify, /api/domain), and health monitoring (/health)
 with HTTPS verification provider support, disposable email detection, and RFC 7505 Null MX handling.
 """
 
@@ -10,7 +10,12 @@ import logging
 from collections import defaultdict
 from flask import Flask, render_template, request, jsonify
 
-from verifier import verify_email_list, test_smtp_outbound_capability
+from verifier import (
+    verify_email_list,
+    test_smtp_outbound_capability,
+    check_domain_diagnostics,
+    PIPELINE_STAGES
+)
 from providers import get_verification_provider
 
 # Configure logging (Privacy-first: do NOT log full email addresses or API keys)
@@ -71,7 +76,9 @@ def index():
         smtp_available=smtp_available,
         provider_name=provider.name,
         provider_configured=has_api_key,
-        max_emails=MAX_EMAILS_PER_REQUEST
+        max_emails=MAX_EMAILS_PER_REQUEST,
+        pipeline_stages=PIPELINE_STAGES,
+        pipeline_stage_count=len(PIPELINE_STAGES)
     )
 
 
@@ -85,12 +92,73 @@ def health():
     return jsonify({
         "status": "healthy",
         "service": "EmailCheck",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "provider": provider.name,
         "provider_configured": has_api_key,
         "smtp_outbound_available": smtp_available,
-        "max_emails_per_request": MAX_EMAILS_PER_REQUEST
+        "max_emails_per_request": MAX_EMAILS_PER_REQUEST,
+        "pipeline_stages": PIPELINE_STAGES,
+        "pipeline_stage_count": len(PIPELINE_STAGES)
     }), 200
+
+
+@app.route("/api/pipeline", methods=["GET"])
+def api_pipeline():
+    """Returns the authoritative 7-stage verification pipeline definition."""
+    return jsonify({
+        "success": True,
+        "stages": PIPELINE_STAGES,
+        "count": len(PIPELINE_STAGES)
+    }), 200
+
+
+@app.route("/api/domain", methods=["GET", "POST"])
+def api_domain():
+    """
+    Dedicated Domain Diagnostics API endpoint.
+    Accepts GET /api/domain?domain=example.com or POST {"domain": "example.com"}
+    """
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+    if is_rate_limited(client_ip):
+        logger.warning("Rate limit exceeded for client %s on /api/domain", client_ip)
+        return jsonify({
+            "success": False,
+            "error": "Rate limit exceeded. Please wait a minute before submitting again."
+        }), 429
+
+    domain = None
+    if request.method == "POST":
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+            domain = body.get("domain")
+        else:
+            domain = request.form.get("domain")
+    else:
+        domain = request.args.get("domain")
+
+    if not domain or not isinstance(domain, str) or not domain.strip():
+        return jsonify({
+            "success": False,
+            "error": "Domain parameter is required."
+        }), 400
+
+    domain_str = domain.strip()
+    if len(domain_str) > 253:
+        return jsonify({
+            "success": False,
+            "error": "Domain name exceeds maximum length of 253 characters."
+        }), 400
+
+    try:
+        diagnostics = check_domain_diagnostics(domain_str)
+        status_code = 200 if diagnostics.get("success") else 400
+        return jsonify(diagnostics), status_code
+    except Exception as exc:
+        logger.error("Domain diagnostics error for domain %s: %s", domain_str, str(exc), exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "An internal error occurred during domain diagnostics. Please try again."
+        }), 500
 
 
 @app.route("/api/verify", methods=["POST"])
@@ -196,7 +264,9 @@ def not_found(e):
         smtp_available=check_cached_smtp_capability(),
         provider_name=provider.name,
         provider_configured=has_api_key,
-        max_emails=MAX_EMAILS_PER_REQUEST
+        max_emails=MAX_EMAILS_PER_REQUEST,
+        pipeline_stages=PIPELINE_STAGES,
+        pipeline_stage_count=len(PIPELINE_STAGES)
     ), 404
 
 

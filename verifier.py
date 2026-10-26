@@ -1,6 +1,6 @@
 """
-EmailCheck - Verification Core Logic (v2.0)
-Implements a 7-stage non-invasive email verification pipeline:
+EmailCheck - Verification Core Logic (v2.1)
+Implements an authoritative 7-stage non-invasive email verification pipeline:
 1. Syntax Validation (RFC 5322)
 2. Normalization (preserves local-part, normalizes domain)
 3. Disposable Email Detection (curated dataset & provider tags)
@@ -14,6 +14,8 @@ import os
 import re
 import socket
 import smtplib
+import time
+import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import dns.resolver
 import dns.exception
@@ -26,6 +28,45 @@ except ImportError:
     HAS_EMAIL_VALIDATOR = False
 
 from providers import is_disposable_domain, get_verification_provider, BaseVerificationProvider
+
+# Authoritative definition of the 7 pipeline stages
+PIPELINE_STAGES = [
+    {
+        "id": 1,
+        "name": "Syntax Validation",
+        "description": "Validates email structure and characters according to RFC 5322 standards."
+    },
+    {
+        "id": 2,
+        "name": "Email Normalization",
+        "description": "Trims whitespace and lowercases domain while preserving local-part casing per RFC 5321."
+    },
+    {
+        "id": 3,
+        "name": "Disposable Domain Detection",
+        "description": "Identifies temporary or disposable email domains using a curated blacklist and provider tags."
+    },
+    {
+        "id": 4,
+        "name": "DNS Domain Validation",
+        "description": "Resolves domain records in DNS and detects nonexistent domains (NXDOMAIN)."
+    },
+    {
+        "id": 5,
+        "name": "MX and Null MX Validation",
+        "description": "Queries mail routing records, detects RFC 7505 Null MX ('0 .'), and applies implicit MX fallbacks."
+    },
+    {
+        "id": 6,
+        "name": "Provider Recipient Verification",
+        "description": "Performs HTTPS recipient inbox deliverability check via configured provider over port 443."
+    },
+    {
+        "id": 7,
+        "name": "Result Classification",
+        "description": "Classifies addresses into Valid, Invalid, Risky, or Unknown with diagnostic reasoning."
+    }
+]
 
 # Reliable fallback nameservers to avoid local/virtual adapter timeouts
 PUBLIC_NAMESERVERS = ['8.8.8.8', '1.1.1.1', '8.8.4.4', '1.0.0.1']
@@ -473,6 +514,7 @@ def verify_single_email(
     """
     Performs complete 7-stage verification pipeline for a single email address.
     """
+    start_t = time.perf_counter()
     raw_email = str(email_str or "").strip()
     local_part, norm_domain, normalized_email = normalize_email(raw_email)
 
@@ -487,6 +529,7 @@ def verify_single_email(
             is_disposable=False,
             syntax_error=syntax_err
         )
+        duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
         return {
             "email": raw_email,
             "normalized_email": normalized_email,
@@ -495,13 +538,17 @@ def verify_single_email(
             "domain_status": "untested",
             "mx_status": "untested",
             "mx_records": [],
+            "is_null_mx": False,
+            "primary_mx": None,
             "is_disposable": False,
             "recipient_status": "untested",
             "provider_info": None,
             "smtp_status": "skipped",
             "classification": classification,
             "status_category": status_cat,
-            "reason": reason
+            "reason": reason,
+            "duration_ms": duration_ms,
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
     # Stage 3: Disposable Domain Detection
@@ -556,6 +603,8 @@ def verify_single_email(
     elif smtp_info:
         recipient_status = smtp_info.get("smtp_status", "unknown")
 
+    duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
+
     return {
         "email": raw_email,
         "normalized_email": normalized_email,
@@ -564,6 +613,8 @@ def verify_single_email(
         "domain_status": domain_status,
         "mx_status": mx_status,
         "mx_records": mx_records,
+        "is_null_mx": dns_result.get("is_null_mx", False),
+        "primary_mx": primary_mx,
         "is_disposable": disposable,
         "recipient_status": recipient_status,
         "provider_info": {
@@ -575,7 +626,9 @@ def verify_single_email(
         "smtp_status": smtp_info.get("smtp_status", "skipped") if smtp_info else recipient_status,
         "classification": classification,
         "status_category": status_cat,
-        "reason": reason
+        "reason": reason,
+        "duration_ms": duration_ms,
+        "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
 
 
@@ -655,4 +708,110 @@ def verify_email_list(
         "provider": active_provider.name,
         "summary": summary,
         "results": results
+    }
+
+
+def check_domain_diagnostics(
+    domain_input: str,
+    resolver: Optional[dns.resolver.Resolver] = None
+) -> Dict[str, Any]:
+    """
+    Dedicated diagnostic tool for domain-level mail routing inspection.
+    Evaluates:
+    - Domain syntax and sanitization
+    - DNS resolution status (exists, nonexistent, timeout, error)
+    - MX records and preferences
+    - RFC 7505 Null MX detection
+    - RFC 5321 Implicit MX (A/AAAA records)
+    - Disposable domain detection
+    - Evidence whether the domain is configured to receive email
+    """
+    start_t = time.perf_counter()
+    clean = str(domain_input or "").strip().lower()
+    # Strip protocol prefixes or URL paths if pasted accidentally
+    clean = re.sub(r"^https?://", "", clean)
+    clean = clean.split("/")[0].split(":")[0].strip().rstrip(".")
+
+    if not clean:
+        return {
+            "success": False,
+            "domain": "",
+            "syntax_valid": False,
+            "error": "Domain name cannot be empty."
+        }
+
+    # Domain syntax check (RFC 1035 / RFC 1123)
+    domain_regex = re.compile(
+        r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$"
+    )
+    if not domain_regex.match(clean):
+        return {
+            "success": False,
+            "domain": clean,
+            "syntax_valid": False,
+            "error": f"Invalid domain syntax: '{clean}' is not a valid fully qualified domain name."
+        }
+
+    disposable = is_disposable_domain(clean)
+    dns_res = check_domain_dns(clean, resolver=resolver)
+
+    domain_status = dns_res.get("domain_status", "unknown")
+    mx_status = dns_res.get("mx_status", "unknown")
+    is_null_mx = dns_res.get("is_null_mx", False)
+    mx_records = dns_res.get("mx_records", [])
+    primary_mx = dns_res.get("primary_mx")
+    dns_error = dns_res.get("error")
+
+    can_receive_email = False
+    verdict = "Inconclusive"
+    confidence = "Low"
+    routing_explanation = ""
+
+    if domain_status == "nonexistent":
+        verdict = "Domain Nonexistent"
+        confidence = "High"
+        routing_explanation = "The domain does not exist in DNS (NXDOMAIN). Mail sent to this domain will bounce."
+    elif is_null_mx or mx_status == "null_mx":
+        verdict = "Rejects All Email (Null MX)"
+        confidence = "High"
+        routing_explanation = "Domain publishes an RFC 7505 Null MX record ('0 .'), explicitly declaring that it does not accept email under any circumstances."
+    elif mx_status == "no_records":
+        verdict = "No Mail Routing Configured"
+        confidence = "High"
+        routing_explanation = "The domain exists in DNS, but lacks MX, A, or AAAA mail routing records. Email cannot be delivered."
+    elif mx_status in ("dns_timeout", "dns_error") or domain_status in ("dns_timeout", "dns_error"):
+        verdict = "DNS Resolution Failed"
+        confidence = "Inconclusive"
+        routing_explanation = f"DNS query could not be completed: {dns_error or 'Nameserver timeout'}."
+    elif mx_status in ("mx_found", "implicit_mx_found"):
+        can_receive_email = True
+        confidence = "High" if mx_status == "mx_found" else "Moderate"
+        routing_type = "Active MX records found" if mx_status == "mx_found" else "RFC 5321 Implicit MX (A/AAAA fallback)"
+        verdict = f"Ready to Receive Mail ({routing_type})"
+        routing_explanation = (
+            f"Domain mail routing is active ({len(mx_records)} record{'s' if len(mx_records) != 1 else ''}). "
+            "Note: Domain mail routing confirms the server is configured to accept mail, but does NOT prove that any individual recipient inbox exists."
+        )
+        if disposable:
+            routing_explanation += " Warning: This domain is a known temporary or disposable email service."
+
+    duration_ms = round((time.perf_counter() - start_t) * 1000, 1)
+
+    return {
+        "success": True,
+        "domain": clean,
+        "syntax_valid": True,
+        "domain_status": domain_status,
+        "mx_status": mx_status,
+        "mx_records": mx_records,
+        "primary_mx": primary_mx,
+        "is_null_mx": is_null_mx,
+        "is_disposable": disposable,
+        "can_receive_email": can_receive_email,
+        "verdict": verdict,
+        "confidence": confidence,
+        "routing_explanation": routing_explanation,
+        "disclaimer": "Domain-level mail routing confirms that mail servers are configured to receive messages for this domain. It does not verify individual recipient inbox existence.",
+        "duration_ms": duration_ms,
+        "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }

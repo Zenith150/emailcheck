@@ -19,7 +19,9 @@ from verifier import (
     check_smtp_recipient,
     classify_result,
     verify_single_email,
-    verify_email_list
+    verify_email_list,
+    check_domain_diagnostics,
+    PIPELINE_STAGES
 )
 from providers import (
     is_disposable_domain,
@@ -480,6 +482,110 @@ class TestBatchVerificationAndDeduplication(unittest.TestCase):
         oversized = [f"user{i}@example.com" for i in range(105)]
         with self.assertRaises(ValueError):
             verify_email_list(oversized, max_emails=100)
+
+
+class TestDomainDiagnosticsAndPipeline(unittest.TestCase):
+    """Test suite for domain diagnostics tool, pipeline definitions, and v2.1 metadata."""
+
+    def test_pipeline_stages_definition(self):
+        """Authoritative pipeline definition must contain exactly 7 sequential stages."""
+        self.assertEqual(len(PIPELINE_STAGES), 7)
+        expected_names = [
+            "Syntax Validation",
+            "Email Normalization",
+            "Disposable Domain Detection",
+            "DNS Domain Validation",
+            "MX and Null MX Validation",
+            "Provider Recipient Verification",
+            "Result Classification"
+        ]
+        for idx, stage in enumerate(PIPELINE_STAGES, 1):
+            self.assertEqual(stage["id"], idx)
+            self.assertEqual(stage["name"], expected_names[idx - 1])
+            self.assertTrue(len(stage["description"]) > 10)
+
+    @patch("verifier.check_domain_dns")
+    def test_check_domain_diagnostics_active_mx(self, mock_dns):
+        """Active MX domain should return can_receive_email=True and verdict Ready to Receive Mail."""
+        mock_dns.return_value = {
+            "domain": "google.com",
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["smtp.google.com (priority 10)"],
+            "primary_mx": "smtp.google.com",
+            "is_null_mx": False,
+            "error": None
+        }
+
+        result = check_domain_diagnostics("google.com")
+        self.assertTrue(result["success"])
+        self.assertTrue(result["syntax_valid"])
+        self.assertTrue(result["can_receive_email"])
+        self.assertFalse(result["is_null_mx"])
+        self.assertFalse(result["is_disposable"])
+        self.assertIn("Ready to Receive Mail", result["verdict"])
+        self.assertIn("disclaimer", result)
+
+    @patch("verifier.check_domain_dns")
+    def test_check_domain_diagnostics_null_mx(self, mock_dns):
+        """RFC 7505 Null MX domain should report can_receive_email=False and Rejects All Email."""
+        mock_dns.return_value = {
+            "domain": "nullmx.example.com",
+            "domain_status": "exists",
+            "mx_status": "null_mx",
+            "mx_records": ["0 . (RFC 7505 Null MX)"],
+            "primary_mx": None,
+            "is_null_mx": True,
+            "error": "Domain publishes RFC 7505 Null MX record."
+        }
+
+        result = check_domain_diagnostics("nullmx.example.com")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["can_receive_email"])
+        self.assertTrue(result["is_null_mx"])
+        self.assertIn("Null MX", result["verdict"])
+
+    @patch("verifier.check_domain_dns")
+    def test_check_domain_diagnostics_nxdomain(self, mock_dns):
+        """Nonexistent domain should report can_receive_email=False and Domain Nonexistent."""
+        mock_dns.return_value = {
+            "domain": "nonexistent-domain-12345.org",
+            "domain_status": "nonexistent",
+            "mx_status": "none",
+            "mx_records": [],
+            "primary_mx": None,
+            "is_null_mx": False,
+            "error": "NXDOMAIN"
+        }
+
+        result = check_domain_diagnostics("nonexistent-domain-12345.org")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["can_receive_email"])
+        self.assertIn("Nonexistent", result["verdict"])
+
+    def test_check_domain_diagnostics_invalid_syntax(self):
+        """Empty or invalid domain names should return success=False and an error message."""
+        res_empty = check_domain_diagnostics("")
+        self.assertFalse(res_empty["success"])
+        self.assertIn("empty", res_empty["error"])
+
+        res_invalid = check_domain_diagnostics("invalid_domain_without_tld")
+        self.assertFalse(res_invalid["success"])
+        self.assertIn("Invalid domain syntax", res_invalid["error"])
+
+    def test_check_domain_diagnostics_disposable(self):
+        """Disposable domain should be flagged as is_disposable=True."""
+        result = check_domain_diagnostics("mailinator.com")
+        self.assertTrue(result["is_disposable"])
+
+    def test_verify_single_email_has_v2_1_diagnostics(self):
+        """verify_single_email must return duration_ms, checked_at, and is_null_mx."""
+        res = verify_single_email("bad..syntax@@domain")
+        self.assertIn("duration_ms", res)
+        self.assertIn("checked_at", res)
+        self.assertIn("is_null_mx", res)
+        self.assertFalse(res["syntax_valid"])
+        self.assertIsInstance(res["duration_ms"], (int, float))
 
 
 if __name__ == "__main__":

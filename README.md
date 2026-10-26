@@ -1,4 +1,4 @@
-# EmailCheck — Email Verification & Deliverability Diagnostics (v2.0)
+# EmailCheck — Email Verification & Deliverability Diagnostics (v2.1)
 
 EmailCheck is a full-stack, responsive web application designed for non-invasive email verification and deliverability diagnostics. It resolves cloud hosting restrictions—such as Render's outbound TCP port 25 block—by combining a local 7-stage diagnostic pipeline with reputable email verification APIs operating over secure HTTPS (port 443).
 
@@ -33,7 +33,7 @@ Addresses are classified into four transparent, conservative statuses:
 
 - **Live Application URL:** [https://emailcheck-7c9y.onrender.com/](https://emailcheck-7c9y.onrender.com/)
 - **GitHub Repository URL:** [https://github.com/Zenith150/emailcheck](https://github.com/Zenith150/emailcheck)
-- **Deployment Status:** **Active & Verified on Render** (`GET /health` $\rightarrow$ 200 OK)
+- **Deployment Status:** **Active & Verified on Render** (`GET /health` → 200 OK)
 - **Project Submission Document:** [`submission/EmailCheck_Project_Submission.pdf`](submission/EmailCheck_Project_Submission.pdf)
 
 ---
@@ -41,10 +41,10 @@ Addresses are classified into four transparent, conservative statuses:
 ## Render Outbound SMTP (Port 25) Restriction & Solution
 
 ### The Problem
-Most modern cloud platforms—including **Render**, AWS EC2 (by default), DigitalOcean, and Heroku—strictly block or filter outbound TCP traffic on **port 25** to protect their network reputations and prevent spam abuse. In previous architectures, attempting a raw SMTP handshake (`HELO` $\rightarrow$ `MAIL FROM` $\rightarrow$ `RCPT TO`) from a Render container resulted in immediate socket timeouts, connection drops, or false failure reporting.
+Most modern cloud platforms—including **Render**, AWS EC2 (by default), DigitalOcean, and Heroku—strictly block or filter outbound TCP traffic on **port 25** to protect their network reputations and prevent spam abuse. In previous architectures, attempting a raw SMTP handshake (`HELO` → `MAIL FROM` → `RCPT TO`) from a Render container resulted in immediate socket timeouts, connection drops, or false failure reporting.
 
 ### The Production Solution
-EmailCheck v2.0 solves this restriction cleanly and robustly without attempting to bypass network controls:
+EmailCheck v2.1 solves this restriction cleanly and robustly without attempting to bypass network controls:
 
 1. **HTTPS Provider-Based Verification (Port 443):**
    Direct SMTP probing is replaced by reputable email verification REST APIs over standard HTTPS (port 443). The backend communicates with provider endpoints using Python standard library `urllib.request` with strict timeouts and resilient error handling.
@@ -160,7 +160,7 @@ EmailCheck supports multiple providers through standard environment variables:
 ### 1. Abstract API (Recommended Default)
 - **Features:** Real-time deliverability checks, MX checks, SMTP verification, disposable detection, catch-all detection.
 - **Free Tier:** 100 free requests per month.
-- **Sign-up:** [https://app.abstractapi.com/users/signup](https://app.abstractapi.com/users/signup) $\rightarrow$ Select "Email Verification".
+- **Sign-up:** [https://app.abstractapi.com/users/signup](https://app.abstractapi.com/users/signup) → Select "Email Verification".
 - **Render Configuration:**
   - `EMAIL_VERIFICATION_PROVIDER=abstract`
   - `EMAIL_VERIFICATION_API_KEY=<your_abstract_api_key>`
@@ -211,8 +211,8 @@ To add or update provider credentials on Render:
 2. Click on the **EmailCheck** web service (`emailcheck-7c9y`).
 3. In the left navigation, click **Environment**.
 4. Click **Add Environment Variable**:
-   - Key: `EMAIL_VERIFICATION_PROVIDER` $\rightarrow$ Value: `abstract`
-   - Key: `EMAIL_VERIFICATION_API_KEY` $\rightarrow$ Value: `<your_api_key_here>`
+   - Key: `EMAIL_VERIFICATION_PROVIDER` → Value: `abstract`
+   - Key: `EMAIL_VERIFICATION_API_KEY` → Value: `<your_api_key_here>`
 5. Click **Save Changes**. Render will automatically redeploy the service with the new credentials.
 6. Verify by loading [https://emailcheck-7c9y.onrender.com/health](https://emailcheck-7c9y.onrender.com/health), which will report `"provider_configured": true`.
 
@@ -425,7 +425,7 @@ Ran 37 tests in 1.641s: OK
 
 2. **Option B: Manual Dashboard Setup:**
    - Log in to the [Render Dashboard](https://dashboard.render.com/).
-   - Click **New +** $\rightarrow$ **Web Service**.
+   - Click **New +** → **Web Service**.
    - Select repository `Zenith150/emailcheck`.
    - **Environment:** `Python`
    - **Build Command:** `pip install -r requirements.txt`

@@ -26,15 +26,88 @@ class TestEmailCheckAPI(unittest.TestCase):
         self.assertIn(b"Verify Emails", response.data)
 
     def test_get_health_endpoint(self):
-        """Health check endpoint should return healthy status and provider info."""
+        """Health check endpoint should return healthy status, v2.1, and 7 pipeline stages."""
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["service"], "EmailCheck")
+        self.assertEqual(data["version"], "2.1.0")
         self.assertIn("provider", data)
         self.assertIn("provider_configured", data)
         self.assertIn("smtp_outbound_available", data)
+        self.assertEqual(data["pipeline_stage_count"], 7)
+        self.assertEqual(len(data["pipeline_stages"]), 7)
+
+    def test_get_pipeline_endpoint(self):
+        """GET /api/pipeline returns authoritative pipeline stages."""
+        response = self.client.get("/api/pipeline")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["count"], 7)
+        self.assertEqual(len(data["stages"]), 7)
+
+    @patch("app.check_domain_diagnostics")
+    def test_api_domain_get_endpoint(self, mock_domain_diag):
+        """GET /api/domain?domain=google.com should invoke diagnostics and return 200."""
+        mock_domain_diag.return_value = {
+            "success": True,
+            "domain": "google.com",
+            "syntax_valid": True,
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["smtp.google.com"],
+            "can_receive_email": True,
+            "verdict": "Ready to Receive Mail",
+            "confidence": "High"
+        }
+        response = self.client.get("/api/domain?domain=google.com")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        self.assertTrue(data["can_receive_email"])
+
+    @patch("app.check_domain_diagnostics")
+    def test_api_domain_post_endpoint(self, mock_domain_diag):
+        """POST /api/domain with json payload should return diagnostics."""
+        mock_domain_diag.return_value = {
+            "success": True,
+            "domain": "mailinator.com",
+            "syntax_valid": True,
+            "domain_status": "exists",
+            "mx_status": "mx_found",
+            "mx_records": ["mail2.mailinator.com"],
+            "can_receive_email": True,
+            "is_disposable": True,
+            "verdict": "Ready to Receive Mail",
+            "confidence": "High"
+        }
+        response = self.client.post(
+            "/api/domain",
+            data=json.dumps({"domain": "mailinator.com"}),
+            content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["is_disposable"])
+
+    def test_api_domain_missing_parameter(self):
+        """GET /api/domain without domain parameter should return 400 Bad Request."""
+        response = self.client.get("/api/domain")
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["success"])
+        self.assertIn("required", data["error"])
+
+    def test_no_latex_arrows_in_templates(self):
+        """Regression test: verify no LaTeX dollar arrow syntax in index.html template."""
+        with open("templates/index.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertNotIn(r"$\rightarrow$", content)
+        self.assertNotIn(r"\rightarrow", content)
+        self.assertIn("Non-Invasive Verification Pipeline", content)
+        self.assertIn("Email syntax", content)
 
     @patch("verifier.get_verification_provider")
     @patch("verifier.check_domain_dns")

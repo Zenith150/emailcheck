@@ -2,8 +2,69 @@ import urllib.request
 import json
 import sys
 
+BASE_URL = 'https://emailcheck-7c9y.onrender.com'
+
 def test_live():
-    url = 'https://emailcheck-7c9y.onrender.com/api/verify'
+    print(f"=== Testing EmailCheck v2.1 Live Deployment at {BASE_URL} ===\n")
+
+    # 1. Test GET /health
+    health_url = f"{BASE_URL}/health"
+    print(f"1. Checking {health_url}...")
+    try:
+        req = urllib.request.Request(health_url, headers={'User-Agent': 'EmailCheckLiveTest/2.1'})
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            print(f"   Status: {resp.status} - Data: {data}")
+            assert data.get('status') == 'healthy', "Health check failed"
+            assert data.get('version') == '2.1.0', f"Expected v2.1.0, got {data.get('version')}"
+            assert data.get('pipeline_stage_count') == 7, "Expected 7 pipeline stages"
+            print("   ✓ Health check passed (v2.1.0, 7 stages verified).\n")
+    except Exception as e:
+        print(f"   ✗ Health check failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # 2. Test GET / for LaTeX arrow regression
+    print(f"2. Inspecting HTML for LaTeX arrow leakages at {BASE_URL}/...")
+    try:
+        req = urllib.request.Request(f"{BASE_URL}/", headers={'User-Agent': 'EmailCheckLiveTest/2.1'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            html = resp.read().decode('utf-8')
+            assert r'$\rightarrow$' not in html, "Found literal $\\rightarrow$ in HTML!"
+            assert r'\rightarrow' not in html, "Found literal \\rightarrow in HTML!"
+            assert 'Non-Invasive Verification Pipeline' in html, "Missing clean banner"
+            assert 'Domain Diagnostics' in html, "Missing Domain Diagnostics tab"
+            assert 'Verification History' in html, "Missing Verification History tab"
+            print("   ✓ Zero LaTeX artifacts in live HTML. Exact clean banner verified.\n")
+    except Exception as e:
+        print(f"   ✗ HTML regression check failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # 3. Test POST /api/domain (Domain Diagnostics)
+    domain_url = f"{BASE_URL}/api/domain"
+    print(f"3. Testing Domain Diagnostics endpoint at {domain_url}...")
+    try:
+        req_data = json.dumps({'domain': 'google.com'}).encode('utf-8')
+        req = urllib.request.Request(domain_url, data=req_data, headers={'Content-Type': 'application/json', 'User-Agent': 'EmailCheckLiveTest/2.1'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            res = json.loads(resp.read().decode('utf-8'))
+            assert res.get('success') is True
+            assert res.get('can_receive_email') is True
+            print(f"   ✓ google.com -> {res.get('verdict')} ({len(res.get('mx_records', []))} MX records)")
+
+        # Test disposable domain
+        req_data = json.dumps({'domain': 'mailinator.com'}).encode('utf-8')
+        req = urllib.request.Request(domain_url, data=req_data, headers={'Content-Type': 'application/json', 'User-Agent': 'EmailCheckLiveTest/2.1'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            res = json.loads(resp.read().decode('utf-8'))
+            assert res.get('is_disposable') is True
+            print(f"   ✓ mailinator.com -> Disposable correctly identified (is_disposable={res.get('is_disposable')})\n")
+    except Exception as e:
+        print(f"   ✗ Domain diagnostics test failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # 4. Test POST /api/verify
+    verify_url = f"{BASE_URL}/api/verify"
+    print(f"4. Testing Batch Verification at {verify_url}...")
     payload = {
         'emails': [
             'bad..syntax@@domain',
@@ -13,37 +74,16 @@ def test_live():
         ]
     }
     data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            'Content-Type': 'application/json',
-            'User-Agent': 'EmailCheckLiveTest/2.0'
-        }
-    )
-    
-    print(f"Testing live verification endpoint: {url}")
+    req = urllib.request.Request(verify_url, data=data, headers={'Content-Type': 'application/json', 'User-Agent': 'EmailCheckLiveTest/2.1'})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            print(f"HTTP Status: {resp.status}")
             result = json.loads(resp.read().decode('utf-8'))
-            print("Response Summary:", json.dumps(result.get('summary', {}), indent=2))
-            print("\nDetailed Address Classifications:")
+            print("   Summary:", json.dumps(result.get('summary', {})))
             for item in result.get('results', []):
-                email = item.get('email')
-                classification = item.get('classification')
-                syntax = item.get('syntax_valid')
-                domain_status = item.get('domain_status')
-                mx_status = item.get('mx_status')
-                disposable = item.get('disposable')
-                recipient_check = item.get('recipient_check', {})
-                reason = item.get('reason')
-                print(f" * {email} -> [{classification}]")
-                print(f"   Syntax: {syntax} | Domain: {domain_status} | MX: {mx_status} | Disposable: {disposable}")
-                print(f"   Recipient Status: {recipient_check.get('status')} ({recipient_check.get('details')})")
-                print(f"   Reason: {reason}\n")
+                print(f"   * {item.get('email')} -> [{item.get('classification')}] ({item.get('reason')})")
+            print("\n✓ Live verification pipeline functioning successfully!")
     except Exception as e:
-        print(f"Failed to test live endpoint: {e}", file=sys.stderr)
+        print(f"   ✗ Verification test failed: {e}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == '__main__':

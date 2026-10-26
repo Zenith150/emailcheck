@@ -120,7 +120,7 @@ def create_submission_pdf(
 
     # Title & Header
     story.append(Paragraph("EmailCheck — Email Verification Web Application", title_style))
-    story.append(Paragraph("<b>Project Submission Document (v2.0)</b> | Production HTTPS Email Verification Architecture", subtitle_style))
+    story.append(Paragraph("<b>Project Submission Document (v2.1)</b> | Production HTTPS Email Verification & Diagnostics Platform", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=secondary_color, spaceAfter=8, spaceBefore=0))
 
     # Meta Table: Submission details
@@ -131,7 +131,7 @@ def create_submission_pdf(
             Paragraph("<b>Stack:</b> Python 3.11, Flask 3.1, dnspython, HTTPS Provider API, Vanilla JS, CSS3", body_style),
         ],
         [
-            Paragraph("<b>Test Suite:</b> 37 / 37 Tests Passed (100% Pass Rate)", body_style),
+            Paragraph("<b>Test Suite:</b> 49 / 49 Tests Passed (100% Pass Rate)", body_style),
             Paragraph("<b>Hosting Target:</b> Render Cloud Web Service (WSGI Gunicorn)", body_style),
         ]
     ]
@@ -299,11 +299,13 @@ def create_submission_pdf(
     story.append(Paragraph("6. Automated Test Suite Summary", h2_style))
     test_text = (
         "The automated test suite in <code>tests/test_verifier.py</code> and <code>tests/test_api.py</code> was executed "
-        "and passed completely with <b>37 passed tests in 0.32 seconds</b>:<br/>"
+        "and passed completely with <b>49 passed tests in 0.63 seconds</b>:<br/>"
+        "• Authoritative 7-Stage Pipeline definition & regression verification against LaTeX syntax leaks: <b>PASSED</b><br/>"
         "• RFC 5322 Syntax validation & Local-part preserving Normalization: <b>PASSED</b><br/>"
         "• Disposable domain detection (Mailinator, Sharklasers, GuerrillaMail, etc.): <b>PASSED</b><br/>"
         "• DNS MX resolution, NXDOMAIN detection, RFC 7505 Null MX ('0 .'), and RFC 5321 implicit MX: <b>PASSED</b><br/>"
-        "• HTTPS Provider integrations (Abstract API deliverable, undeliverable, quota exceeded 429, Hunter, ZeroBounce): <b>PASSED</b><br/>"
+        "• Domain Diagnostics API (<code>GET/POST /api/domain</code>) & Pipeline API (<code>/api/pipeline</code>): <b>PASSED</b><br/>"
+        "• HTTPS Provider integrations (Abstract, Hunter, ZeroBounce, Local fallback): <b>PASSED</b><br/>"
         "• Classification logic (Valid, Invalid, Risky, Unknown) & Distinguishing domain from recipient verification: <b>PASSED</b><br/>"
         "• Batch memoization, 100-email size boundaries, rate limiting, and API error handlers: <b>PASSED</b>"
     )

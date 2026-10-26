@@ -53,8 +53,17 @@
           </svg>
         </div>
         <div class="notice-body">
-          <strong>Non-Invasive Verification Pipeline:</strong>
-          <span>EmailCheck operates via secure HTTPS (Port 443) without depending on blocked outbound SMTP port 25 connections. Pipeline evaluates: <em>1. Syntax $\rightarrow$ 2. Normalization $\rightarrow$ 3. Disposable Domain Filter $\rightarrow$ 4. DNS Validation $\rightarrow$ 5. MX / Null MX Validation $\rightarrow$ 6. Provider Recipient Verification</em>. No actual emails are ever sent.</span>
+          <strong class="notice-title">Non-Invasive Verification Pipeline</strong>
+          <p class="notice-text">EmailCheck uses secure HTTPS connections to supported verification providers and does not depend on blocked outbound SMTP port 25 connections. The pipeline checks:</p>
+          <ol class="banner-pipeline-list">
+            <li>Email syntax</li>
+            <li>Email normalization</li>
+            <li>Disposable-domain detection</li>
+            <li>DNS domain validation</li>
+            <li>MX and Null MX validation</li>
+            <li>Recipient verification through a configured provider</li>
+          </ol>
+          <p class="notice-subtext">No verification emails are sent by this diagnostic process.</p>
         </div>
       </section>
 
@@ -66,279 +75,466 @@
             <strong>Recipient Verification Provider:</strong>
             <span class="provider-pill">{{ provider_name|capitalize }} Engine</span>
             {% if provider_configured %}
-              — Active & connected over HTTPS. Recipient-level verification is enabled.
+              — Active &amp; connected over HTTPS. Recipient-level verification is enabled.
             {% else %}
-              — Running built-in engine (Syntax, Normalization, Disposable filter, DNS & MX routing). Configure <code>EMAIL_VERIFICATION_API_KEY</code> in Render to enable external live recipient-level checks.
+              — Running built-in engine (Syntax, Normalization, Disposable filter, DNS &amp; MX routing). Configure <code>EMAIL_VERIFICATION_API_KEY</code> in Render to enable external live recipient-level checks.
             {% endif %}
           </span>
         </div>
       </div>
 
-      <!-- Input Card -->
-      <section class="card input-card">
-        <div class="card-header">
-          <div class="card-title-group">
-            <h2 class="card-title">Verify Email Addresses</h2>
-            <p class="card-subtitle">Paste email addresses below (one per line, up to {{ max_emails }} per batch).</p>
-          </div>
-          <div class="input-stats">
-            <span id="lineCountBadge" class="counter-badge">0 / {{ max_emails }} addresses</span>
-          </div>
-        </div>
+      <!-- Main Navigation Tabs -->
+      <nav class="main-tabs" role="tablist" aria-label="Tool Navigation">
+        <button type="button" class="main-tab-btn active" id="tabVerifyEmails" role="tab" aria-selected="true" aria-controls="sectionVerifyEmails">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5C2 7 4 5 6.5 5H17.5C20 5 22 7 22 9.5V17z"/>
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+            <path d="m9 13 2 2 4-4"/>
+          </svg>
+          <span>Batch Verification</span>
+        </button>
+        <button type="button" class="main-tab-btn" id="tabDomainDiag" role="tab" aria-selected="false" aria-controls="sectionDomainDiag">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <span>Domain Diagnostics</span>
+        </button>
+        <button type="button" class="main-tab-btn" id="tabHistory" role="tab" aria-selected="false" aria-controls="sectionHistory">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>Verification History</span>
+          <span id="historyBadge" class="history-count-pill" style="display: none;">0</span>
+        </button>
+      </nav>
 
-        <form id="verifyForm" class="verify-form" onsubmit="return false;">
-          <div class="textarea-wrapper">
-            <textarea
-              id="emailsInput"
-              name="emails"
-              rows="7"
-              placeholder="alex.smith@example.com&#10;sarah.johnson@company.org&#10;test.user@mailinator.com&#10;service@nonexistent-domain.invalid"
-              aria-label="Email list to verify"
-              spellcheck="false"
-              autocomplete="off"
-            ></textarea>
+      <!-- SECTION 1: Batch Email Verification -->
+      <div id="sectionVerifyEmails" role="tabpanel" aria-labelledby="tabVerifyEmails">
+        
+        <!-- Input Card -->
+        <section class="card input-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Verify Email Addresses</h2>
+              <p class="card-subtitle">Paste multiple email addresses separated by newlines, commas, semicolons, or spaces (up to {{ max_emails }} addresses per batch).</p>
+            </div>
+            <div class="input-stats">
+              <span id="lineCountBadge" class="counter-badge">0 / {{ max_emails }} addresses</span>
+            </div>
           </div>
 
-          <div class="form-options">
-            <div class="provider-badge-info">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-              <span>HTTPS Recipient Verification (No Port 25 Required)</span>
+          <form id="verifyForm" class="verify-form" onsubmit="return false;">
+            <div class="textarea-wrapper">
+              <textarea
+                id="emailsInput"
+                name="emails"
+                rows="7"
+                placeholder="alex.smith@example.com&#10;sarah.johnson@company.org&#10;test.user@mailinator.com&#10;service@nonexistent-domain.invalid"
+                aria-label="Email list to verify"
+                spellcheck="false"
+                autocomplete="off"
+              ></textarea>
             </div>
 
-            <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
+            <div class="input-hint-row">
+              <span class="input-hint" id="batchDuplicateHint">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="16" x2="12" y2="12"/>
+                  <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                Delimiters supported: newlines, commas, semicolons, or spaces. Duplicates are automatically memoized.
+              </span>
+            </div>
+
+            <div class="form-options">
+              <div class="provider-badge-info">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                <span>HTTPS Recipient Verification (No Port 25 Required)</span>
+              </div>
+
+              <button type="button" id="loadSampleBtn" class="btn btn-ghost btn-sm">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                Load Diverse Sample List
+              </button>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="verifyBtn" class="btn btn-primary">
+                <span class="btn-spinner" id="btnSpinner" aria-hidden="true" style="display: none;"></span>
+                <svg id="btnIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <span id="btnText">Verify Emails</span>
+              </button>
+
+              <button type="button" id="clearBtn" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+                Clear
+              </button>
+            </div>
+          </form>
+
+          <!-- Progress Bar Indicator -->
+          <div id="progressContainer" class="progress-bar-container" style="display: none;">
+            <div class="progress-info">
+              <span id="progressText">Executing 7-stage verification pipeline...</span>
+              <span class="progress-pulsar"></span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-bar-fill indeterminate"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Summary Statistics Section -->
+        <section id="summarySection" class="summary-grid summary-grid-5" style="display: none;" aria-label="Verification Summary">
+          <div class="summary-card card-total">
+            <div class="card-icon total-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
               </svg>
-              Load Diverse Sample List
-            </button>
+            </div>
+            <div class="summary-meta">
+              <span class="summary-label">Total Checked</span>
+              <span id="summaryTotal" class="summary-value">0</span>
+              <span id="summaryUniqueMeta" class="summary-subtext">0 unique</span>
+            </div>
           </div>
 
-          <div class="form-actions">
-            <button type="submit" id="verifyBtn" class="btn btn-primary">
-              <span class="btn-spinner" id="btnSpinner" aria-hidden="true"></span>
-              <svg id="btnIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <div class="summary-card card-delivered">
+            <div class="card-icon delivered-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
-              <span id="btnText">Verify Emails</span>
-            </button>
+            </div>
+            <div class="summary-meta">
+              <span class="summary-label">Valid</span>
+              <span id="summaryDelivered" class="summary-value text-green">0</span>
+              <span id="pctDelivered" class="summary-subtext">0% of total</span>
+            </div>
+          </div>
 
-            <button type="button" id="clearBtn" class="btn btn-secondary">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="summary-card card-bounce">
+            <div class="card-icon bounce-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <line x1="18" y1="6" x2="6" y2="18"/>
                 <line x1="6" y1="6" x2="18" y2="18"/>
               </svg>
-              Clear
-            </button>
-          </div>
-        </form>
-
-        <!-- Progress Bar Indicator -->
-        <div id="progressContainer" class="progress-bar-container" style="display: none;">
-          <div class="progress-info">
-            <span id="progressText">Executing verification pipeline...</span>
-            <span class="progress-pulsar"></span>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-bar-fill indeterminate"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Summary Statistics Section -->
-      <section id="summarySection" class="summary-grid summary-grid-5" style="display: none;" aria-label="Verification Summary">
-        <div class="summary-card card-total">
-          <div class="card-icon total-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-          </div>
-          <div class="summary-meta">
-            <span class="summary-label">Total Checked</span>
-            <span id="summaryTotal" class="summary-value">0</span>
-          </div>
-        </div>
-
-        <div class="summary-card card-delivered">
-          <div class="card-icon delivered-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          </div>
-          <div class="summary-meta">
-            <span class="summary-label">Valid / Deliverable</span>
-            <span id="summaryDelivered" class="summary-value text-green">0</span>
-            <span id="pctDelivered" class="summary-subtext">0%</span>
-          </div>
-        </div>
-
-        <div class="summary-card card-bounce">
-          <div class="card-icon bounce-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </div>
-          <div class="summary-meta">
-            <span class="summary-label">Invalid / Bounce</span>
-            <span id="summaryBounce" class="summary-value text-red">0</span>
-            <span id="pctBounce" class="summary-subtext">0%</span>
-          </div>
-        </div>
-
-        <div class="summary-card card-risky">
-          <div class="card-icon risky-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-              <line x1="12" y1="9" x2="12" y2="13"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-          </div>
-          <div class="summary-meta">
-            <span class="summary-label">Risky</span>
-            <span id="summaryRisky" class="summary-value text-amber">0</span>
-            <span id="pctRisky" class="summary-subtext">0%</span>
-          </div>
-        </div>
-
-        <div class="summary-card card-unknown">
-          <div class="card-icon unknown-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-          </div>
-          <div class="summary-meta">
-            <span class="summary-label">Unknown</span>
-            <span id="summaryUnknown" class="summary-value text-slate">0</span>
-            <span id="pctUnknown" class="summary-subtext">0%</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Results Section -->
-      <section id="resultsSection" class="card results-card" style="display: none;">
-        <div class="results-header">
-          <div class="filter-controls">
-            <div class="filter-tabs" role="tablist">
-              <button type="button" class="tab-btn active" data-filter="all" role="tab" aria-selected="true">
-                All <span id="tabCountAll" class="tab-counter">0</span>
-              </button>
-              <button type="button" class="tab-btn filter-delivered" data-filter="Valid" role="tab" aria-selected="false">
-                Valid <span id="tabCountDelivered" class="tab-counter">0</span>
-              </button>
-              <button type="button" class="tab-btn filter-bounce" data-filter="Invalid" role="tab" aria-selected="false">
-                Invalid <span id="tabCountBounce" class="tab-counter">0</span>
-              </button>
-              <button type="button" class="tab-btn filter-risky" data-filter="Risky" role="tab" aria-selected="false">
-                Risky <span id="tabCountRisky" class="tab-counter">0</span>
-              </button>
-              <button type="button" class="tab-btn filter-unknown" data-filter="Unknown" role="tab" aria-selected="false">
-                Unknown <span id="tabCountUnknown" class="tab-counter">0</span>
-              </button>
             </div>
-
-            <div class="search-box">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              </svg>
-              <input type="text" id="searchInput" placeholder="Filter emails or domains..." aria-label="Filter results table">
+            <div class="summary-meta">
+              <span class="summary-label">Invalid</span>
+              <span id="summaryBounce" class="summary-value text-red">0</span>
+              <span id="pctBounce" class="summary-subtext">0% of total</span>
             </div>
           </div>
 
-          <div class="export-actions">
-            <button type="button" id="downloadCsvBtn" class="btn btn-outline btn-sm">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
+          <div class="summary-card card-risky">
+            <div class="card-icon risky-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
               </svg>
-              Download CSV
-            </button>
+            </div>
+            <div class="summary-meta">
+              <span class="summary-label" title="Catch-all servers, disposable domains, or unverified recipient inboxes">Risky</span>
+              <span id="summaryRisky" class="summary-value text-amber">0</span>
+              <span id="pctRisky" class="summary-subtext">0% of total</span>
+            </div>
           </div>
-        </div>
 
-        <!-- Responsive Table Container -->
-        <div class="table-container">
-          <table class="results-table" id="resultsTable">
-            <thead>
-              <tr>
-                <th scope="col" style="width: 45px;">#</th>
-                <th scope="col">Email Address</th>
-                <th scope="col" style="width: 95px;">Syntax</th>
-                <th scope="col" style="width: 130px;">Domain / MX</th>
-                <th scope="col" style="width: 105px;">Disposable</th>
-                <th scope="col" style="width: 130px;">Recipient Check</th>
-                <th scope="col" style="width: 135px;">Classification</th>
-                <th scope="col">Explanation & Diagnostics</th>
-              </tr>
-            </thead>
-            <tbody id="resultsTableBody">
-              <!-- Dynamically populated rows -->
-            </tbody>
-          </table>
-        </div>
+          <div class="summary-card card-unknown">
+            <div class="card-icon unknown-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div class="summary-meta">
+              <span class="summary-label" title="DNS timeouts, nameserver errors, or provider rate limits">Unknown</span>
+              <span id="summaryUnknown" class="summary-value text-slate">0</span>
+              <span id="pctUnknown" class="summary-subtext">0% of total</span>
+            </div>
+          </div>
+        </section>
 
-        <div id="noMatchMessage" class="no-matches" style="display: none;">
-          <p>No results match your active search or filter.</p>
-        </div>
-      </section>
+        <!-- Results Section -->
+        <section id="resultsSection" class="card results-card" style="display: none;">
+          <div class="results-header">
+            <div class="filter-controls">
+              <div class="filter-tabs" role="tablist" aria-label="Filter results by classification">
+                <button type="button" class="tab-btn active" data-filter="all" role="tab" aria-selected="true">
+                  All <span id="tabCountAll" class="tab-counter">0</span>
+                </button>
+                <button type="button" class="tab-btn filter-delivered" data-filter="Valid" role="tab" aria-selected="false">
+                  Valid <span id="tabCountDelivered" class="tab-counter">0</span>
+                </button>
+                <button type="button" class="tab-btn filter-bounce" data-filter="Invalid" role="tab" aria-selected="false">
+                  Invalid <span id="tabCountBounce" class="tab-counter">0</span>
+                </button>
+                <button type="button" class="tab-btn filter-risky" data-filter="Risky" role="tab" aria-selected="false">
+                  Risky <span id="tabCountRisky" class="tab-counter">0</span>
+                </button>
+                <button type="button" class="tab-btn filter-unknown" data-filter="Unknown" role="tab" aria-selected="false">
+                  Unknown <span id="tabCountUnknown" class="tab-counter">0</span>
+                </button>
+              </div>
 
-      <!-- Empty State -->
-      <section id="emptyState" class="empty-state">
-        <div class="empty-illustration">
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-            <polyline points="22,6 12,13 2,6"/>
-            <circle cx="18" cy="18" r="3"/>
-            <path d="m17 18 1 1 2-2"/>
-          </svg>
-        </div>
-        <h3>No Emails Verified Yet</h3>
-        <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to inspect syntax, disposable domains, DNS mail routing, and HTTPS recipient inbox deliverability.</p>
-      </section>
+              <div class="search-box">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="searchInput" placeholder="Search emails or domains..." aria-label="Filter results table">
+              </div>
 
-      <!-- Information & Methodology Section -->
+              <div class="sort-box">
+                <label for="sortSelect" class="sr-only">Sort Results</label>
+                <select id="sortSelect" class="sort-select" aria-label="Sort results by">
+                  <option value="original">Order: Original</option>
+                  <option value="email-asc">Email (A → Z)</option>
+                  <option value="email-desc">Email (Z → A)</option>
+                  <option value="class-valid">Status (Valid First)</option>
+                  <option value="class-invalid">Status (Invalid First)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="export-actions">
+              <button type="button" id="downloadCsvBtn" class="btn btn-outline btn-sm">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download CSV
+              </button>
+            </div>
+          </div>
+
+          <!-- Responsive Table Container -->
+          <div class="table-container">
+            <table class="results-table" id="resultsTable">
+              <thead>
+                <tr>
+                  <th scope="col" style="width: 45px;">#</th>
+                  <th scope="col">Email Address</th>
+                  <th scope="col" style="width: 95px;" title="RFC 5322 syntax validation">Syntax</th>
+                  <th scope="col" style="width: 135px;" title="DNS resolution and Mail Exchanger (MX) routing">Domain / MX</th>
+                  <th scope="col" style="width: 105px;" title="Disposable or temporary inbox detection">Disposable</th>
+                  <th scope="col" style="width: 130px;" title="HTTPS provider recipient-level inbox verification">Recipient Check</th>
+                  <th scope="col" style="width: 130px;">Classification</th>
+                  <th scope="col">Explanation &amp; Diagnostics</th>
+                  <th scope="col" style="width: 80px; text-align: center;">Details</th>
+                </tr>
+              </thead>
+              <tbody id="resultsTableBody">
+                <!-- Dynamically populated rows and collapsible details panels -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination Bar -->
+          <div class="pagination-bar" id="paginationBar" style="display: none;">
+            <div class="page-info">
+              Showing <span id="pageShowingStart">1</span>–<span id="pageShowingEnd">25</span> of <span id="pageShowingTotal">0</span>
+            </div>
+            <div class="page-size-selector">
+              <label for="pageSizeSelect">Per page:</label>
+              <select id="pageSizeSelect" class="form-select select-xs" aria-label="Items per page">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <div class="page-nav">
+              <button type="button" id="prevPageBtn" class="btn btn-outline btn-xs" disabled aria-label="Previous page">‹ Prev</button>
+              <span id="pageIndicator" class="page-indicator">Page 1 / 1</span>
+              <button type="button" id="nextPageBtn" class="btn btn-outline btn-xs" disabled aria-label="Next page">Next ›</button>
+            </div>
+          </div>
+
+          <div id="noMatchMessage" class="no-matches" style="display: none;">
+            <p>No results match your active search or filter.</p>
+          </div>
+        </section>
+
+        <!-- Empty State -->
+        <section id="emptyState" class="empty-state">
+          <div class="empty-illustration">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+              <circle cx="18" cy="18" r="3"/>
+              <path d="m17 18 1 1 2-2"/>
+            </svg>
+          </div>
+          <h3>No Emails Verified Yet</h3>
+          <p>Paste a list of email addresses above and click <strong>Verify Emails</strong> to inspect syntax, disposable domains, DNS mail routing, and HTTPS recipient inbox deliverability.</p>
+        </section>
+
+      </div>
+
+      <!-- SECTION 2: Domain Diagnostics Tool -->
+      <div id="sectionDomainDiag" class="tab-content-panel" style="display: none;" role="tabpanel" aria-labelledby="tabDomainDiag">
+        <section class="card domain-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Domain Mail Routing Diagnostics</h2>
+              <p class="card-subtitle">Inspect DNS MX records, RFC 7505 Null MX detection, A/AAAA implicit MX fallback, and disposable status for any domain name.</p>
+            </div>
+          </div>
+
+          <form id="domainForm" class="domain-form" onsubmit="return false;">
+            <div class="domain-input-group">
+              <div class="domain-input-wrapper">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="2" y1="12" x2="22" y2="12"/>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                </svg>
+                <input
+                  type="text"
+                  id="domainInput"
+                  placeholder="e.g. google.com, mailinator.com, or example.org"
+                  aria-label="Domain to diagnose"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </div>
+              <button type="submit" id="domainInspectBtn" class="btn btn-primary">
+                <span class="btn-spinner" id="domainSpinner" aria-hidden="true" style="display: none;"></span>
+                <svg id="domainBtnIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <span id="domainBtnText">Inspect Domain</span>
+              </button>
+            </div>
+
+            <div class="domain-quick-samples">
+              <span class="sample-label">Quick samples:</span>
+              <button type="button" class="sample-tag" data-domain="google.com">google.com</button>
+              <button type="button" class="sample-tag" data-domain="github.com">github.com</button>
+              <button type="button" class="sample-tag" data-domain="mailinator.com">mailinator.com (Disposable)</button>
+              <button type="button" class="sample-tag" data-domain="example.com">example.com (No MX)</button>
+            </div>
+          </form>
+
+          <!-- Domain Results Panel -->
+          <div id="domainResultCard" class="domain-result-panel" style="display: none;">
+            <!-- Populated by JavaScript -->
+          </div>
+        </section>
+      </div>
+
+      <!-- SECTION 3: Verification History -->
+      <div id="sectionHistory" class="tab-content-panel" style="display: none;" role="tabpanel" aria-labelledby="tabHistory">
+        <section class="card history-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Recent Verification Sessions</h2>
+              <p class="card-subtitle">Previous sessions stored locally in your browser. Reopen past results or export them to CSV at any time.</p>
+            </div>
+            <div class="history-actions">
+              <button type="button" id="clearHistoryBtn" class="btn btn-outline btn-sm">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                Clear History
+              </button>
+            </div>
+          </div>
+
+          <div id="historyList" class="history-list">
+            <!-- Populated by JavaScript -->
+          </div>
+
+          <div id="historyEmptyState" class="history-empty" style="display: none;">
+            <div class="empty-illustration">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </div>
+            <p>No verification history stored in this browser yet.</p>
+            <small class="text-muted">Verification sessions are saved automatically to your device's browser storage.</small>
+          </div>
+
+          <div class="history-privacy-notice">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span>History is stored strictly on your local browser and device. No search history is stored on or sent to our servers.</span>
+          </div>
+        </section>
+      </div>
+
+      <!-- Information & Methodology Section (Derived from authoritative 7 stages) -->
       <section id="about" class="info-section">
-        <h2 class="info-title">Reliable 7-Stage Verification Pipeline</h2>
+        <h2 class="info-title">Reliable {{ pipeline_stage_count }}-Stage Verification Pipeline</h2>
+        <p class="info-intro">EmailCheck evaluates email deliverability through a rigorous {{ pipeline_stage_count }}-stage diagnostic pipeline. Each check is evaluated in sequence and checks that are skipped or unavailable are transparently distinguished from completed checks.</p>
+
+        <div class="pipeline-stages-grid">
+          {% for stage in pipeline_stages %}
+          <div class="stage-card">
+            <div class="stage-number">Stage {{ stage.id }}</div>
+            <h3 class="stage-name">{{ stage.name }}</h3>
+            <p class="stage-desc">{{ stage.description }}</p>
+          </div>
+          {% endfor %}
+        </div>
+
+        <h3 class="classification-heading">Classification Categories</h3>
         <div class="info-grid">
           <div class="info-card">
-            <div class="info-badge badge-green">1. Valid / Deliverable</div>
+            <div class="info-badge badge-green">Valid</div>
             <p>Email has valid RFC syntax, resolves to an active domain with usable MX records, is not a disposable provider, and recipient inbox was confirmed deliverable by verification provider.</p>
-            <small class="text-muted">High deliverability confidence. Inbox placement still subject to spam filters.</small>
+            <small class="text-muted">High deliverability confidence. Inbox delivery subject to recipient mailbox quotas and spam filters.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-red">2. Invalid / Bounce</div>
+            <div class="info-badge badge-red">Invalid</div>
             <p>Malformed syntax, domain confirmed nonexistent (NXDOMAIN), domain publishes an RFC 7505 Null MX record, has no mail routing, or recipient was confirmed undeliverable.</p>
             <small class="text-muted">Emails sent to this address will almost certainly bounce or be rejected.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-amber">3. Risky</div>
+            <div class="info-badge badge-amber">Risky</div>
             <p>Domain is a temporary/disposable service, mail server is configured as catch-all (accepts any user), address is a generic role, or domain exists but recipient inbox is unverified.</p>
             <small class="text-muted">Distinguishes domain routing from recipient inbox confirmation.</small>
           </div>
 
           <div class="info-card">
-            <div class="info-badge badge-slate">4. Unknown</div>
+            <div class="info-badge badge-slate">Unknown</div>
             <p>DNS query timed out, nameserver failed, or provider API experienced rate limiting, quota exhaustion, or temporary timeout.</p>
             <small class="text-muted">Transparent fallback: never guesses deliverability when diagnostics are inconclusive.</small>
           </div>
         </div>
 
         <div class="privacy-box">
-          <h4>🔒 Port 25 Replacement & Privacy Architecture</h4>
+          <h4>🔒 Port 25 Replacement &amp; Privacy Architecture</h4>
           <p>EmailCheck completely replaces direct SMTP port 25 probing with secure, cloud-friendly HTTPS APIs (port 443). We <strong>never send emails</strong>, never issue SMTP <code>DATA</code> commands, and do not store submitted email lists in permanent databases. All processing occurs in memory and user data is never retained.</p>
         </div>
       </section>
